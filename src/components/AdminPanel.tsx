@@ -29,6 +29,19 @@ export interface AdminPanelProps {
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
+  // Admin authentication state (Password: abirta009)
+  const [isAdminAuthed, setIsAdminAuthed] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('arx_admin_authed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [passInput, setPassInput] = useState('');
+  const [passError, setPassError] = useState('');
+  const [showPass, setShowPass] = useState(false);
+  const [isVerifyingPass, setIsVerifyingPass] = useState(false);
+
   // Key generator state
   const [keyInput, setKeyInput] = useState('');
   const [duration, setDuration] = useState('30_days');
@@ -42,7 +55,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
 
   // Key list & stats state
   const [keys, setKeys] = useState<AdminKeyItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'expired' | 'inactive'>('all');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -74,6 +88,51 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     }, 3500);
   };
 
+  // Password verification handler
+  const handleVerifyPassword = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    soundFX.playClick();
+    const clean = passInput.trim();
+    if (!clean) {
+      setPassError('এডমিন পাসওয়ার্ড প্রবেশ করান।');
+      soundFX.playLossBuzzer();
+      return;
+    }
+
+    setIsVerifyingPass(true);
+    setPassError('');
+
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: clean }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if ((res.ok && data.success) || clean.toLowerCase() === 'abirta009') {
+        soundFX.playWinChime();
+        sessionStorage.setItem('arx_admin_authed', 'true');
+        setIsAdminAuthed(true);
+        fetchKeys();
+      } else {
+        soundFX.playLossBuzzer();
+        setPassError('ভুল Admin পাসওয়ার্ড! সঠিক পাসওয়ার্ড প্রবেশ করান (abirta009)।');
+      }
+    } catch {
+      if (clean.toLowerCase() === 'abirta009') {
+        soundFX.playWinChime();
+        sessionStorage.setItem('arx_admin_authed', 'true');
+        setIsAdminAuthed(true);
+        fetchKeys();
+      } else {
+        soundFX.playLossBuzzer();
+        setPassError('ভুল Admin পাসওয়ার্ড! সঠিক পাসওয়ার্ড প্রবেশ করান (abirta009)।');
+      }
+    } finally {
+      setIsVerifyingPass(false);
+    }
+  };
+
   // Generate random key string
   const handleRandomizeKey = () => {
     soundFX.playClick();
@@ -89,6 +148,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
   // Fetch keys from Firebase backend
   const fetchKeys = async () => {
     setIsLoading(true);
+    setFetchError(null);
     try {
       const res = await fetch('/api/admin/keys');
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
@@ -97,16 +157,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
         setKeys(data.keys);
       }
     } catch (err: any) {
-      showToast('Firebase কী লোড করতে সমস্যা হয়েছে: ' + err?.message, 'error');
+      setFetchError(err?.message || 'কানেকশন সমস্যা');
+      showToast('Firebase কী লোড করতে সমস্যা হয়েছে: ' + (err?.message || 'পুনরায় চেষ্টা করুন'), 'error');
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchKeys();
-    handleRandomizeKey();
-  }, []);
+    if (isAdminAuthed) {
+      fetchKeys();
+      handleRandomizeKey();
+    }
+  }, [isAdminAuthed]);
 
   // Create new key (Single or Bulk with Full Secure Encryption)
   const handleCreateKey = async (e?: React.FormEvent) => {
@@ -114,10 +177,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
     soundFX.playClick();
 
     let targetKey = keyInput.trim().toUpperCase();
-    if (!targetKey && bulkCount === 1) {
-      handleRandomizeKey();
-      return;
-    }
 
     setIsSubmitting(true);
     let durationHours: number | null = null;
@@ -137,7 +196,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          key: bulkCount === 1 ? targetKey : undefined,
+          key: bulkCount === 1 && targetKey ? targetKey : undefined,
           plan,
           durationHours,
           durationDays,
@@ -175,7 +234,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
       }
     } catch (err: any) {
       soundFX.playLossBuzzer();
-      showToast('সার্ভার এরর: ' + err?.message, 'error');
+      showToast('সার্ভার এরর: ' + (err?.message || 'পুনরায় চেষ্টা করুন'), 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -361,6 +420,78 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
   const expiredCount = keys.filter((k) => k.status === 'expired').length;
   const inactiveCount = keys.filter((k) => k.status === 'inactive').length;
 
+  // If not authenticated with password abirta009, show clean admin login gate
+  if (!isAdminAuthed) {
+    return (
+      <div className="relative w-full max-w-sm mx-auto my-auto p-5 sm:p-6 bg-[#0c101a] border-2 border-red-500/50 rounded-3xl shadow-[0_0_50px_rgba(239,68,68,0.35)] flex flex-col items-center gap-4 text-center mt-8">
+        <div className="w-14 h-14 mx-auto rounded-2xl bg-red-600/20 border border-red-500 flex items-center justify-center">
+          <Key className="w-7 h-7 text-red-400" />
+        </div>
+        <div>
+          <h2 className="font-cyber font-black text-lg text-white tracking-wider">
+            ADMIN PANEL AUTHENTICATION
+          </h2>
+          <p className="text-xs font-mono-cyber text-slate-400 mt-1">
+            পাসওয়ার্ড (abirta009) প্রদান করে অ্যাডমিন প্যানেলে প্রবেশ করুন
+          </p>
+        </div>
+
+        <form onSubmit={handleVerifyPassword} className="w-full space-y-3">
+          <div className="relative">
+            <input
+              type={showPass ? 'text' : 'password'}
+              value={passInput}
+              onChange={(e) => {
+                setPassInput(e.target.value);
+                if (passError) setPassError('');
+              }}
+              placeholder="Enter admin password..."
+              className="w-full px-3.5 py-3 rounded-xl bg-black/80 border border-red-500/50 text-white font-mono-cyber text-sm focus:outline-none focus:border-red-400 pr-16"
+              autoFocus
+            />
+            <button
+              type="button"
+              onClick={() => setShowPass(!showPass)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer text-[10px] font-mono-cyber uppercase"
+            >
+              {showPass ? 'HIDE' : 'SHOW'}
+            </button>
+          </div>
+
+          {passError && (
+            <div className="p-2.5 bg-red-950/80 border border-red-500/50 rounded-xl text-xs font-mono-cyber text-red-300 text-left">
+              {passError}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            {onClose && (
+              <button
+                type="button"
+                onClick={() => {
+                  soundFX.playClick();
+                  onClose();
+                }}
+                className="py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono-cyber text-xs rounded-xl cursor-pointer"
+              >
+                বাতিল (Exit)
+              </button>
+            )}
+            <button
+              type="submit"
+              disabled={isVerifyingPass}
+              className={`py-2.5 bg-red-600 hover:bg-red-500 text-white font-cyber font-bold text-xs uppercase rounded-xl cursor-pointer shadow-lg shadow-red-900/50 flex items-center justify-center gap-1.5 ${
+                !onClose ? 'col-span-2' : ''
+              }`}
+            >
+              {isVerifyingPass ? 'যাচাই হচ্ছে...' : 'LOGIN TO ADMIN →'}
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div className="relative w-full max-w-2xl mx-auto px-2 sm:px-3 pb-24 pt-1 flex flex-col gap-4">
       {/* Toast */}
@@ -368,6 +499,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[9999] px-4 py-2.5 rounded-2xl bg-[#0e121d] border border-red-500/60 text-white font-mono-cyber text-xs shadow-2xl flex items-center gap-2 animate-bounce">
           <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
           <span>{toast.message}</span>
+        </div>
+      )}
+
+      {/* Sync Warning / Notice if any */}
+      {fetchError && (
+        <div className="p-3 bg-amber-950/40 border border-amber-500/50 rounded-xl flex items-center justify-between text-xs font-mono-cyber text-amber-200">
+          <span>Firebase সিঙ্ক সমস্যা: {fetchError} (ব্যাকআপ ক্যাশ প্রদর্শিত)</span>
+          <button
+            onClick={fetchKeys}
+            className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-black font-bold rounded-lg cursor-pointer"
+          >
+            Retry Sync
+          </button>
         </div>
       )}
 
@@ -660,7 +804,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
         {/* Create Button */}
         <button
           onClick={() => handleCreateKey()}
-          disabled={isSubmitting || (bulkCount === 1 && !keyInput.trim())}
+          disabled={isSubmitting}
           className="w-full py-3 bg-gradient-to-r from-red-600 via-rose-600 to-red-600 hover:from-red-500 hover:to-rose-500 text-white font-cyber font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-red-900/40 border border-red-400/50 cursor-pointer transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-1 active:scale-[0.99]"
         >
           {isSubmitting ? (

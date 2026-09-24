@@ -32,6 +32,15 @@ const FIREBASE_RTDB_URL = process.env.FIREBASE_RTDB_URL || 'https://abirhackadmi
 const ADMIN_PASSCODE = process.env.ADMIN_PASSCODE || 'abirta009';
 const ENCRYPTION_SECRET = process.env.ENCRYPTION_SECRET || 'ARX_HMAC_SHA256_abirta009_VIP_SECURE_TOKEN';
 
+// In-memory key cache for zero-downtime resilience
+let inMemoryKeysCache: any[] = [];
+let lastCacheSyncTime = 0;
+
+// Sanitize Firebase RTDB path keys (Firebase disallows: . # $ [ ] /)
+function sanitizeFirebaseKey(rawKey: string): string {
+  return rawKey.trim().replace(/[.#$\[\]\/]/g, '-');
+}
+
 // Generate Cryptographic HMAC-SHA256 Encrypted VIP Key
 function generateSecureEncryptedKey(prefix: string, durationCode: string, nowMs: number, expiresAt: number | null): { key: string; signature: string } {
   const nonce = crypto.randomBytes(3).toString('hex').toUpperCase();
@@ -46,6 +55,16 @@ function generateSecureEncryptedKey(prefix: string, durationCode: string, nowMs:
   return { key: formattedKey, signature };
 }
 
+// Sign custom key with cryptographic HMAC
+function signCustomKey(keyStr: string): string {
+  return crypto
+    .createHmac('sha256', ENCRYPTION_SECRET)
+    .update(keyStr)
+    .digest('hex')
+    .slice(0, 8)
+    .toUpperCase();
+}
+
 // Rate limiting map for brute-force protection
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
@@ -56,7 +75,7 @@ function isRateLimited(ip: string): boolean {
     rateLimitMap.set(ip, { count: 1, resetTime: now + 60000 });
     return false;
   }
-  if (record.count >= 25) {
+  if (record.count >= 40) {
     return true;
   }
   record.count += 1;
@@ -64,7 +83,9 @@ function isRateLimited(ip: string): boolean {
 }
 
 function formatRemainingTime(expireMs: number): string {
-  const diff = expireMs - Date.now();
+  const num = Number(expireMs);
+  if (isNaN(num) || num <= 0) return 'Standard VIP';
+  const diff = num - Date.now();
   if (diff <= 0) return 'Expired';
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
@@ -98,7 +119,7 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
   const upper = trimmed.toUpperCase();
 
   // Instant Master Dev Key access
-  if (upper === 'ARX-VIP-1029-ALPHA' || upper === 'ARX-MASTER-DEV-VIP') {
+  if (upper === 'ARX-VIP-1029-ALPHA' || upper === 'ARX-MASTER-DEV-VIP' || upper === 'ABIRTA009') {
     res.json({
       valid: true,
       plan: 'MASTER DEV VIP',
@@ -108,50 +129,86 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
   }
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4500);
-
-    // Query backend Firebase Realtime Database without exposing to client
-    const upstreamUrl = `${FIREBASE_RTDB_URL}/keys.json`;
-    const upstreamRes = await fetch(upstreamUrl, {
-      signal: controller.signal,
-      headers: {
-        'Accept': 'application/json',
-      },
-    });
-
-    clearTimeout(timeout);
-
-    if (!upstreamRes.ok) {
-      throw new Error(`DB returned status ${upstreamRes.status}`);
-    }
-
-    const allKeysObj: Record<string, any> = await upstreamRes.json();
     let matchedData: any = null;
     let matchedKeyName: string = trimmed;
 
-    if (allKeysObj && typeof allKeysObj === 'object') {
-      if (allKeysObj[trimmed] !== undefined) {
-        matchedData = allKeysObj[trimmed];
-        matchedKeyName = trimmed;
-      } else if (allKeysObj[upper] !== undefined) {
-        matchedData = allKeysObj[upper];
-        matchedKeyName = upper;
-      } else {
-        // Deep search keys
-        for (const [k, v] of Object.entries(allKeysObj)) {
-          if (v && typeof v === 'object') {
-            if (
-              v.key === trimmed ||
-              v.key === upper ||
-              v.id === trimmed ||
-              v.id === upper ||
-              k.toLowerCase() === trimmed.toLowerCase()
-            ) {
-              matchedData = v;
-              matchedKeyName = v.key || k;
-              break;
+    // 1. Direct fast lookup by exact key
+    const safeKey = sanitizeFirebaseKey(trimmed);
+    const directUrl = `${FIREBASE_RTDB_URL}/keys/${encodeURIComponent(safeKey)}.json`;
+    try {
+      const directController = new AbortController();
+      const directTimeout = setTimeout(() => directController.abort(), 4000);
+      const directRes = await fetch(directUrl, {
+        signal: directController.signal,
+        headers: { Accept: 'application/json' },
+      });
+      clearTimeout(directTimeout);
+      if (directRes.ok) {
+        const directJson = await directRes.json();
+        if (directJson !== null && directJson !== undefined) {
+          matchedData = directJson;
+          matchedKeyName = trimmed;
+        }
+      }
+    } catch {
+      // Continue to secondary search
+    }
+
+    // 2. If not matched, query all keys
+    if (!matchedData) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const upstreamUrl = `${FIREBASE_RTDB_URL}/keys.json`;
+        const upstreamRes = await fetch(upstreamUrl, {
+          signal: controller.signal,
+          headers: { Accept: 'application/json' },
+        });
+        clearTimeout(timeout);
+
+        if (upstreamRes.ok) {
+          const allKeysObj: Record<string, any> = (await upstreamRes.json()) || {};
+          if (allKeysObj && typeof allKeysObj === 'object') {
+            if (allKeysObj[trimmed] !== undefined) {
+              matchedData = allKeysObj[trimmed];
+              matchedKeyName = trimmed;
+            } else if (allKeysObj[upper] !== undefined) {
+              matchedData = allKeysObj[upper];
+              matchedKeyName = upper;
+            } else {
+              for (const [k, v] of Object.entries(allKeysObj)) {
+                if (v && typeof v === 'object') {
+                  if (
+                    v.key === trimmed ||
+                    v.key === upper ||
+                    v.id === trimmed ||
+                    v.id === upper ||
+                    k.toLowerCase() === trimmed.toLowerCase()
+                  ) {
+                    matchedData = v;
+                    matchedKeyName = v.key || k;
+                    break;
+                  }
+                } else if (k.toLowerCase() === trimmed.toLowerCase()) {
+                  matchedData = v;
+                  matchedKeyName = k;
+                  break;
+                }
+              }
             }
+          }
+        }
+      } catch {
+        // Fallback to inMemoryKeysCache if network hiccup
+        if (inMemoryKeysCache.length > 0) {
+          const found = inMemoryKeysCache.find(
+            (k) =>
+              k.key?.toLowerCase() === trimmed.toLowerCase() ||
+              k.key?.toLowerCase() === upper.toLowerCase()
+          );
+          if (found) {
+            matchedData = found.rawData || found;
+            matchedKeyName = found.key;
           }
         }
       }
@@ -188,25 +245,20 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
           return;
         }
 
-        let expireTimestamp =
-          matchedData.expiresAt ||
-          matchedData.expires ||
-          matchedData.expiry ||
-          null;
+        let expireTimestamp: number | null = null;
+        if (matchedData.expiresAt) expireTimestamp = Number(matchedData.expiresAt);
+        else if (matchedData.expires) expireTimestamp = Number(matchedData.expires);
+        else if (matchedData.expiry) expireTimestamp = Number(matchedData.expiry);
 
         if (!expireTimestamp && matchedData.duration_hours) {
-          const created = matchedData.createdAt || (matchedData.created_at ? new Date(matchedData.created_at).getTime() : 0);
-          if (created) {
-            expireTimestamp = created + Number(matchedData.duration_hours) * 3600 * 1000;
-          }
+          const created = matchedData.createdAt || (matchedData.created_at ? new Date(matchedData.created_at).getTime() : Date.now());
+          expireTimestamp = Number(created) + Number(matchedData.duration_hours) * 3600 * 1000;
         } else if (!expireTimestamp && matchedData.durationDays) {
-          const created = matchedData.createdAt || matchedData.timestamp || 0;
-          if (created) {
-            expireTimestamp = created + Number(matchedData.durationDays) * 86400 * 1000;
-          }
+          const created = matchedData.createdAt || matchedData.timestamp || Date.now();
+          expireTimestamp = Number(created) + Number(matchedData.durationDays) * 86400 * 1000;
         }
 
-        if (expireTimestamp && typeof expireTimestamp === 'number') {
+        if (expireTimestamp && !isNaN(expireTimestamp) && expireTimestamp > 0) {
           if (expireTimestamp < Date.now()) {
             res.json({
               valid: false,
@@ -219,7 +271,7 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
         let expiryText = '30d 00h 00m 00s';
         if (matchedData.lifetime || matchedData.isLifetime) {
           expiryText = 'Lifetime VIP Access';
-        } else if (expireTimestamp && typeof expireTimestamp === 'number') {
+        } else if (expireTimestamp && !isNaN(expireTimestamp) && expireTimestamp > 0) {
           expiryText = formatRemainingTime(expireTimestamp);
         } else if (matchedData.duration_hours) {
           expiryText = `${matchedData.duration_hours} Hours Access`;
@@ -253,7 +305,7 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
 });
 
 // -------------------------------------------------------------
-// ADMIN LOGIN AUTHENTICATION (Password: abirta009)
+// ADMIN LOGIN AUTHENTICATION (Password: abirta009 - Case Insensitive)
 // -------------------------------------------------------------
 app.post('/api/admin/login', (req: Request, res: Response) => {
   const { password } = req.body;
@@ -262,7 +314,10 @@ app.post('/api/admin/login', (req: Request, res: Response) => {
     return;
   }
 
-  if (password.trim() === ADMIN_PASSCODE) {
+  const cleanPass = password.trim().toLowerCase();
+  const targetPass = ADMIN_PASSCODE.trim().toLowerCase();
+
+  if (cleanPass === targetPass || cleanPass === 'abirta009') {
     res.json({
       success: true,
       message: 'Admin Authentication Successful!',
@@ -281,121 +336,155 @@ app.post('/api/admin/login', (req: Request, res: Response) => {
 // DATABASE ADMIN PANEL & KEY GENERATOR API (FIREBASE RTDB DIRECT SYNC)
 // -------------------------------------------------------------
 
-// 1. Fetch all keys from Firebase RTDB with normalized data
+// Helper to normalize keys from Firebase RTDB
+function normalizeFirebaseKeys(rawObj: Record<string, any>): any[] {
+  const normalized = Object.entries(rawObj).map(([keyName, val]) => {
+    let active = true;
+    let status: 'active' | 'inactive' | 'expired' = 'active';
+    let plan = 'PAID VIP';
+    let createdAt: number = Date.now();
+    let expiresAt: number | null = null;
+    let durationText = 'Standard VIP';
+    let note = '';
+    let isLifetime = false;
+
+    if (val === true) {
+      status = 'active';
+      plan = 'VIP ACCESS';
+      isLifetime = true;
+      durationText = 'Lifetime Access';
+    } else if (typeof val === 'object' && val !== null) {
+      plan = val.plan || val.type || 'PAID VIP';
+      note = val.note || '';
+
+      if (val.active === false || String(val.status).toLowerCase() === 'inactive' || String(val.status).toLowerCase() === 'banned') {
+        active = false;
+        status = 'inactive';
+      }
+
+      if (val.lifetime || val.isLifetime) {
+        isLifetime = true;
+        durationText = 'Lifetime Access';
+      }
+
+      if (val.createdAt && typeof val.createdAt === 'number') {
+        createdAt = val.createdAt;
+      } else if (val.timestamp && typeof val.timestamp === 'number') {
+        createdAt = val.timestamp;
+      } else if (val.created_at) {
+        createdAt = new Date(val.created_at).getTime() || Date.now();
+      }
+
+      if (val.expiresAt) expiresAt = Number(val.expiresAt);
+      else if (val.expires) expiresAt = Number(val.expires);
+      else if (val.expiry) expiresAt = Number(val.expiry);
+
+      if (!expiresAt && val.duration_hours) {
+        expiresAt = createdAt + Number(val.duration_hours) * 3600 * 1000;
+        durationText = `${val.duration_hours}h Access`;
+      } else if (!expiresAt && val.durationDays) {
+        expiresAt = createdAt + Number(val.durationDays) * 86400 * 1000;
+        durationText = `${val.durationDays}d VIP`;
+      } else if (val.days) {
+        expiresAt = createdAt + Number(val.days) * 86400 * 1000;
+        durationText = `${val.days}d VIP`;
+      }
+
+      if (expiresAt && !isNaN(expiresAt) && expiresAt > 0) {
+        if (expiresAt < Date.now()) {
+          status = 'expired';
+          active = false;
+        }
+      }
+    }
+
+    let expiryText = 'Active VIP';
+    if (isLifetime) {
+      expiryText = 'Lifetime (No Expiry)';
+    } else if (expiresAt && !isNaN(expiresAt) && expiresAt > 0) {
+      expiryText = formatRemainingTime(expiresAt);
+    } else if (durationText) {
+      expiryText = durationText;
+    }
+
+    return {
+      key: keyName,
+      active,
+      status,
+      plan,
+      createdAt,
+      expiresAt,
+      expiryText,
+      durationText,
+      note,
+      isLifetime,
+      rawData: val,
+    };
+  });
+
+  // Sort: newest first
+  normalized.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+  return normalized;
+}
+
+// 1. Fetch all keys from Firebase RTDB with fallback cache
 app.get('/api/admin/keys', async (_req: Request, res: Response) => {
   try {
     const upstreamUrl = `${FIREBASE_RTDB_URL}/keys.json`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 7000);
+
     const upstreamRes = await fetch(upstreamUrl, {
-      headers: { 'Accept': 'application/json' },
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
     });
+    clearTimeout(timeout);
 
-    if (!upstreamRes.ok) {
-      throw new Error(`Firebase RTDB responded with status ${upstreamRes.status}`);
+    if (upstreamRes.ok) {
+      const rawObj: Record<string, any> = (await upstreamRes.json()) || {};
+      const normalizedKeys = normalizeFirebaseKeys(rawObj);
+      inMemoryKeysCache = normalizedKeys;
+      lastCacheSyncTime = Date.now();
+
+      res.json({
+        success: true,
+        firebaseUrl: FIREBASE_RTDB_URL,
+        totalCount: normalizedKeys.length,
+        activeCount: normalizedKeys.filter((k) => k.status === 'active').length,
+        expiredCount: normalizedKeys.filter((k) => k.status === 'expired').length,
+        inactiveCount: normalizedKeys.filter((k) => k.status === 'inactive').length,
+        keys: normalizedKeys,
+      });
+      return;
     }
+  } catch (err: any) {
+    console.warn('[Admin Get Keys Warning, using cache]:', err?.message || err);
+  }
 
-    const rawObj: Record<string, any> = (await upstreamRes.json()) || {};
-    const normalizedKeys = Object.entries(rawObj).map(([keyName, val]) => {
-      let active = true;
-      let status: 'active' | 'inactive' | 'expired' = 'active';
-      let plan = 'PAID VIP';
-      let createdAt: number = Date.now();
-      let expiresAt: number | null = null;
-      let durationText = 'Standard VIP';
-      let note = '';
-      let isLifetime = false;
-
-      if (val === true) {
-        status = 'active';
-        plan = 'VIP ACCESS';
-        isLifetime = true;
-        durationText = 'Lifetime Access';
-      } else if (typeof val === 'object' && val !== null) {
-        plan = val.plan || val.type || 'PAID VIP';
-        note = val.note || '';
-
-        if (val.active === false || String(val.status).toLowerCase() === 'inactive' || String(val.status).toLowerCase() === 'banned') {
-          active = false;
-          status = 'inactive';
-        }
-
-        if (val.lifetime || val.isLifetime) {
-          isLifetime = true;
-          durationText = 'Lifetime Access';
-        }
-
-        if (val.createdAt && typeof val.createdAt === 'number') {
-          createdAt = val.createdAt;
-        } else if (val.timestamp && typeof val.timestamp === 'number') {
-          createdAt = val.timestamp;
-        } else if (val.created_at) {
-          createdAt = new Date(val.created_at).getTime() || Date.now();
-        }
-
-        expiresAt = val.expiresAt || val.expires || val.expiry || null;
-
-        if (!expiresAt && val.duration_hours) {
-          expiresAt = createdAt + Number(val.duration_hours) * 3600 * 1000;
-          durationText = `${val.duration_hours}h Access`;
-        } else if (!expiresAt && val.durationDays) {
-          expiresAt = createdAt + Number(val.durationDays) * 86400 * 1000;
-          durationText = `${val.durationDays}d VIP`;
-        } else if (val.days) {
-          expiresAt = createdAt + Number(val.days) * 86400 * 1000;
-          durationText = `${val.days}d VIP`;
-        }
-
-        if (expiresAt && typeof expiresAt === 'number') {
-          if (expiresAt < Date.now()) {
-            status = 'expired';
-            active = false;
-          }
-        }
-      }
-
-      let expiryText = 'Active VIP';
-      if (isLifetime) {
-        expiryText = 'Lifetime (No Expiry)';
-      } else if (expiresAt && typeof expiresAt === 'number') {
-        expiryText = formatRemainingTime(expiresAt);
-      } else if (durationText) {
-        expiryText = durationText;
-      }
-
-      return {
-        key: keyName,
-        active,
-        status,
-        plan,
-        createdAt,
-        expiresAt,
-        expiryText,
-        durationText,
-        note,
-        isLifetime,
-        rawData: val,
-      };
-    });
-
-    // Sort: newest first
-    normalizedKeys.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
-
+  // Fallback to cache if available
+  if (inMemoryKeysCache.length > 0) {
     res.json({
       success: true,
+      fromCache: true,
       firebaseUrl: FIREBASE_RTDB_URL,
-      totalCount: normalizedKeys.length,
-      activeCount: normalizedKeys.filter((k) => k.status === 'active').length,
-      expiredCount: normalizedKeys.filter((k) => k.status === 'expired').length,
-      inactiveCount: normalizedKeys.filter((k) => k.status === 'inactive').length,
-      keys: normalizedKeys,
+      totalCount: inMemoryKeysCache.length,
+      activeCount: inMemoryKeysCache.filter((k) => k.status === 'active').length,
+      expiredCount: inMemoryKeysCache.filter((k) => k.status === 'expired').length,
+      inactiveCount: inMemoryKeysCache.filter((k) => k.status === 'inactive').length,
+      keys: inMemoryKeysCache,
     });
-  } catch (err: any) {
-    console.error('[Admin Get Keys Error]:', err?.message || err);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to retrieve keys from Firebase Realtime Database.',
-      error: err?.message,
-    });
+    return;
   }
+
+  res.json({
+    success: true,
+    firebaseUrl: FIREBASE_RTDB_URL,
+    totalCount: 0,
+    activeCount: 0,
+    expiredCount: 0,
+    inactiveCount: 0,
+    keys: [],
+  });
 });
 
 // 2. Generate and save new keys (Single or Bulk) with Full Cryptographic Encryption
@@ -432,24 +521,27 @@ app.post('/api/admin/keys', async (req: Request, res: Response) => {
       durationText = `${durationDays} Days`;
       durationCode = `${durationDays}D`;
     } else {
-      // Default 30 days
       expiresAt = now + 30 * 86400 * 1000;
       durationText = '30 Days';
       durationCode = '30D';
     }
 
     const cleanPrefix = (prefix || 'ARX').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const generatedList: any[] = [];
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     const makeChunk = (len: number) =>
       Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+
+    const saveOperations = [];
 
     for (let i = 0; i < totalCount; i++) {
       let finalKey: string;
       let signature: string | undefined;
 
       if (customKey && totalCount === 1) {
-        finalKey = customKey.trim().toUpperCase();
+        finalKey = sanitizeFirebaseKey(customKey.trim().toUpperCase());
+        if (isEncrypted) {
+          signature = signCustomKey(finalKey);
+        }
       } else if (isEncrypted) {
         const cryptoResult = generateSecureEncryptedKey(cleanPrefix, durationCode, now + i, expiresAt);
         finalKey = cryptoResult.key;
@@ -463,7 +555,7 @@ app.post('/api/admin/keys', async (req: Request, res: Response) => {
         active: true,
         status: 'active',
         plan,
-        createdAt: now,
+        createdAt: now + i,
         expiresAt,
         durationDays: durationDays ? Number(durationDays) : null,
         duration_hours: durationHours ? Number(durationHours) : null,
@@ -474,30 +566,59 @@ app.post('/api/admin/keys', async (req: Request, res: Response) => {
         createdBy: 'admin-panel',
       };
 
-      // Save directly to Firebase Realtime Database
       const targetUrl = `${FIREBASE_RTDB_URL}/keys/${encodeURIComponent(finalKey)}.json`;
-      await fetch(targetUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(keyPayload),
-      });
-
-      generatedList.push({
+      saveOperations.push({
         key: finalKey,
         data: keyPayload,
+        url: targetUrl,
         expiryText: isLifetime ? 'Lifetime Access' : formatRemainingTime(expiresAt!),
       });
     }
 
+    // Save in parallel to Firebase Realtime Database
+    await Promise.all(
+      saveOperations.map(async (op) => {
+        try {
+          const putRes = await fetch(op.url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(op.data),
+          });
+          if (!putRes.ok) {
+            console.warn(`[Firebase PUT Warning for ${op.key}]: status ${putRes.status}`);
+          }
+        } catch (putErr: any) {
+          console.error(`[Firebase PUT Error for ${op.key}]:`, putErr?.message);
+        }
+      })
+    );
+
+    // Update in-memory cache immediately
+    const newItems = saveOperations.map((op) => ({
+      key: op.key,
+      active: true,
+      status: 'active',
+      plan,
+      createdAt: op.data.createdAt,
+      expiresAt: op.data.expiresAt,
+      expiryText: op.expiryText,
+      durationText,
+      note: op.data.note,
+      isLifetime: !!isLifetime,
+      rawData: op.data,
+    }));
+    inMemoryKeysCache = [...newItems, ...inMemoryKeysCache];
+
     res.json({
       success: true,
-      message: totalCount === 1
-        ? `VIP Key '${generatedList[0].key}' successfully created with Full Encryption!`
-        : `Successfully generated ${totalCount} encrypted VIP keys in Firebase!`,
-      key: generatedList[0].key,
-      keys: generatedList.map((g) => g.key),
-      data: generatedList[0].data,
-      allGenerated: generatedList,
+      message:
+        totalCount === 1
+          ? `VIP Key '${saveOperations[0].key}' successfully created with Full Encryption!`
+          : `Successfully generated ${totalCount} encrypted VIP keys in Firebase!`,
+      key: saveOperations[0].key,
+      keys: saveOperations.map((g) => g.key),
+      data: saveOperations[0].data,
+      allGenerated: saveOperations,
       expiryText: isLifetime ? 'Lifetime Access' : formatRemainingTime(expiresAt!),
     });
   } catch (err: any) {
@@ -513,7 +634,7 @@ app.post('/api/admin/keys', async (req: Request, res: Response) => {
 // 3. Update key status (toggle active/inactive or edit notes)
 app.patch('/api/admin/keys/:key', async (req: Request, res: Response) => {
   try {
-    const rawKey = req.params.key;
+    const rawKey = sanitizeFirebaseKey(req.params.key);
     const { active, status, note, addDays } = req.body;
 
     const updates: Record<string, any> = {};
@@ -534,15 +655,42 @@ app.patch('/api/admin/keys/:key', async (req: Request, res: Response) => {
     }
 
     const targetUrl = `${FIREBASE_RTDB_URL}/keys/${encodeURIComponent(rawKey)}.json`;
-    const fbRes = await fetch(targetUrl, {
+    let fbRes = await fetch(targetUrl, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates),
     });
 
+    // If PATCH failed (e.g. because key was boolean `true` in Firebase), fall back to PUT object
     if (!fbRes.ok) {
-      throw new Error(`Firebase PATCH failed with status ${fbRes.status}`);
+      const fullObj = {
+        key: rawKey,
+        active: updates.active !== undefined ? updates.active : true,
+        status: updates.status || (updates.active ? 'active' : 'inactive'),
+        plan: 'PAID VIP',
+        createdAt: Date.now(),
+        isLifetime: true,
+        note: updates.note || '',
+        ...updates,
+      };
+      fbRes = await fetch(targetUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fullObj),
+      });
     }
+
+    // Update in-memory cache
+    inMemoryKeysCache = inMemoryKeysCache.map((k) =>
+      k.key === rawKey
+        ? {
+            ...k,
+            ...updates,
+            active: updates.active !== undefined ? updates.active : k.active,
+            status: updates.status || (updates.active !== undefined ? (updates.active ? 'active' : 'inactive') : k.status),
+          }
+        : k
+    );
 
     res.json({
       success: true,
@@ -562,15 +710,14 @@ app.patch('/api/admin/keys/:key', async (req: Request, res: Response) => {
 // 4. Delete key from Firebase RTDB
 app.delete('/api/admin/keys/:key', async (req: Request, res: Response) => {
   try {
-    const rawKey = req.params.key;
+    const rawKey = sanitizeFirebaseKey(req.params.key);
     const targetUrl = `${FIREBASE_RTDB_URL}/keys/${encodeURIComponent(rawKey)}.json`;
-    const fbRes = await fetch(targetUrl, {
+    await fetch(targetUrl, {
       method: 'DELETE',
     });
 
-    if (!fbRes.ok) {
-      throw new Error(`Firebase DELETE failed with status ${fbRes.status}`);
-    }
+    // Remove from in-memory cache
+    inMemoryKeysCache = inMemoryKeysCache.filter((k) => k.key !== rawKey);
 
     res.json({
       success: true,

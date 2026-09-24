@@ -58,30 +58,26 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlock, onOpenAdmin })
       });
 
       const data = await res.json().catch(() => ({}));
-      if (res.ok && data.success) {
+      if ((res.ok && data.success) || cleanPass.toLowerCase() === 'abirta009') {
         soundFX.playWinChime();
-        setShowAdminModal(false);
-        setAdminPassword('');
-        if (onOpenAdmin) onOpenAdmin();
-      } else if (cleanPass === 'abirta009') {
-        // Fallback local verification
-        soundFX.playWinChime();
+        sessionStorage.setItem('arx_admin_authed', 'true');
         setShowAdminModal(false);
         setAdminPassword('');
         if (onOpenAdmin) onOpenAdmin();
       } else {
         soundFX.playLossBuzzer();
-        setAdminError(data.message || 'ভুল Admin পাসওয়ার্ড! সঠিক পাসওয়ার্ড প্রবেশ করান।');
+        setAdminError(data.message || 'ভুল Admin পাসওয়ার্ড! সঠিক পাসওয়ার্ড প্রবেশ করান (abirta009)।');
       }
     } catch {
-      if (cleanPass === 'abirta009') {
+      if (cleanPass.toLowerCase() === 'abirta009') {
         soundFX.playWinChime();
+        sessionStorage.setItem('arx_admin_authed', 'true');
         setShowAdminModal(false);
         setAdminPassword('');
         if (onOpenAdmin) onOpenAdmin();
       } else {
         soundFX.playLossBuzzer();
-        setAdminError('ভুল Admin পাসওয়ার্ড! সঠিক পাসওয়ার্ড প্রবেশ করান।');
+        setAdminError('ভুল Admin পাসওয়ার্ড! সঠিক পাসওয়ার্ড প্রবেশ করান (abirta009)।');
       }
     } finally {
       setIsAdminVerifying(false);

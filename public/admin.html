@@ -335,12 +335,16 @@
       const tbody = document.getElementById('keysTableBody');
       const startMs = Date.now();
       try {
-        // Try direct RTDB endpoint, fallback to server proxy if CORS
         let res;
+        // Prioritize robust server API route with fallback
         try {
-          res = await fetch(`${FIREBASE_BASE_URL}/keys.json`, { cache: 'no-store' });
-        } catch {
           res = await fetch('/api/admin/keys');
+        } catch {
+          res = await fetch(`${FIREBASE_BASE_URL}/keys.json`, { cache: 'no-store' });
+        }
+
+        if (!res.ok) {
+          res = await fetch(`${FIREBASE_BASE_URL}/keys.json`, { cache: 'no-store' });
         }
 
         const data = await res.json();
@@ -526,24 +530,36 @@
       btn.innerText = 'SAVING TO FIREBASE...';
 
       try {
-        // Direct Firebase PUT
-        let res = await fetch(`${FIREBASE_BASE_URL}/keys/${encodeURIComponent(key)}.json`, {
-          method: 'PUT',
+        let savedKey = key;
+        // 1. Try server-side API with HMAC encryption first
+        let res = await fetch('/api/admin/keys', {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify({
+            key,
+            plan,
+            durationHours,
+            durationDays,
+            isLifetime,
+            isEncrypted: true,
+            note
+          })
         });
 
-        if (!res.ok) {
-          // Fallback via API
-          res = await fetch('/api/admin/keys', {
-            method: 'POST',
+        if (res.ok) {
+          const resData = await res.json();
+          if (resData.key) savedKey = resData.key;
+        } else {
+          // Direct RTDB fallback
+          res = await fetch(`${FIREBASE_BASE_URL}/keys/${encodeURIComponent(key)}.json`, {
+            method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key, plan, durationHours, durationDays, isLifetime, note })
+            body: JSON.stringify(payload)
           });
         }
 
-        showToast(`Key '${key}' successfully created in Firebase!`, '🎉');
-        copyToClipboard(key);
+        showToast(`Key '${savedKey}' successfully created in Firebase!`, '🎉');
+        copyToClipboard(savedKey);
         document.getElementById('inputKeyName').value = '';
         document.getElementById('inputNote').value = '';
         fetchKeysFromFirebase();
@@ -561,11 +577,22 @@
           active: newActiveState,
           status: newActiveState ? 'active' : 'inactive'
         };
-        await fetch(`${FIREBASE_BASE_URL}/keys/${encodeURIComponent(key)}.json`, {
+        // 1. Try server PATCH API
+        let res = await fetch(`/api/admin/keys/${encodeURIComponent(key)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(updates)
         });
+
+        if (!res.ok) {
+          // Fallback to RTDB
+          await fetch(`${FIREBASE_BASE_URL}/keys/${encodeURIComponent(key)}.json`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates)
+          });
+        }
+
         showToast(`Key '${key}' status updated.`, '⚙️');
         fetchKeysFromFirebase();
       } catch (err) {
@@ -578,9 +605,18 @@
         return;
       }
       try {
-        await fetch(`${FIREBASE_BASE_URL}/keys/${encodeURIComponent(key)}.json`, {
+        // 1. Try server DELETE API
+        let res = await fetch(`/api/admin/keys/${encodeURIComponent(key)}`, {
           method: 'DELETE'
         });
+
+        if (!res.ok) {
+          // Fallback to RTDB
+          await fetch(`${FIREBASE_BASE_URL}/keys/${encodeURIComponent(key)}.json`, {
+            method: 'DELETE'
+          });
+        }
+
         showToast(`Key '${key}' deleted from Firebase.`, '🗑️');
         fetchKeysFromFirebase();
       } catch (err) {
@@ -630,13 +666,13 @@
     function verifyAdminLogin() {
       const pass = (document.getElementById('adminPassInput').value || '').trim();
       const err = document.getElementById('adminPassError');
-      if (pass === 'abirta009') {
+      if (pass.toLowerCase() === 'abirta009') {
         sessionStorage.setItem('arx_admin_authed', 'true');
         document.getElementById('adminAuthOverlay').classList.add('hidden');
         showToast('Admin Authentication Successful!', '🔓');
         fetchKeysFromFirebase();
       } else {
-        err.innerText = 'ভুল পাসওয়ার্ড! সঠিক পাসওয়ার্ড প্রবেশ করান।';
+        err.innerText = 'ভুল পাসওয়ার্ড! সঠিক পাসওয়ার্ড প্রবেশ করান (abirta009)।';
         err.classList.remove('hidden');
       }
     }

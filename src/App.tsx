@@ -17,6 +17,7 @@ import { HistoryTab } from './components/HistoryTab';
 import { GameTab } from './components/GameTab';
 import { DatabaseTab } from './components/DatabaseTab';
 import { ProfileTab } from './components/ProfileTab';
+import { AdminPanel } from './components/AdminPanel';
 import { WinLossModal } from './components/WinLossModal';
 import {
   getCycleState,
@@ -68,6 +69,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('PREDICT');
   const [currentServer, setCurrentServer] = useState<ServerType>('ARX BRAND SERVER 1 MODS');
   const [gameMode, setGameMode] = useState<GameMode>('WINGO_30S');
+  const [isAdminOpen, setIsAdminOpen] = useState<boolean>(false);
 
   // DUAL-MODE ISOLATED ENGINE STATE (30S and 1M are 100% strictly independent)
   const [modesData, setModesData] = useState<Record<GameMode, ModeEngineState>>(() => {
@@ -611,7 +613,10 @@ export default function App() {
       {/* Main Container */}
       <div className="relative z-10 w-full max-w-md min-h-screen flex flex-col justify-between">
         {!isUnlocked ? (
-          <LockScreen onUnlock={handleUnlock} />
+          <LockScreen
+            onUnlock={handleUnlock}
+            onOpenAdmin={() => setIsAdminOpen(true)}
+          />
         ) : (
           <>
             <Header
@@ -675,6 +680,7 @@ export default function App() {
                 profile={profileUser}
                 onLogout={handleLockOut}
                 onUpdateSound={(enabled) => soundFX.setEnabled(enabled)}
+                onOpenAdmin={() => setIsAdminOpen(true)}
               />
             )}
 
@@ -700,6 +706,27 @@ export default function App() {
           </>
         )}
       </div>
+
+      {/* DEDICATED FULL-SCREEN ADMIN PANEL MODAL */}
+      {isAdminOpen && (
+        <div className="fixed inset-0 z-[999999] bg-[#07090e]/95 backdrop-blur-md overflow-y-auto pt-3 pb-8 px-2 sm:px-4">
+          <div className="max-w-2xl mx-auto flex items-center justify-between pb-2 mb-2 border-b border-red-500/20">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+              <span className="font-cyber font-bold text-xs tracking-wider text-white uppercase">
+                ADMIN ACCESS · FULL SECURE ENCRYPTION
+              </span>
+            </div>
+            <button
+              onClick={() => setIsAdminOpen(false)}
+              className="px-3 py-1 bg-red-600/30 hover:bg-red-600 border border-red-500 rounded-xl text-xs font-cyber font-bold text-white transition-all cursor-pointer shadow-[0_0_10px_rgba(239,68,68,0.4)]"
+            >
+              ✕ CLOSE ADMIN
+            </button>
+          </div>
+          <AdminPanel onClose={() => setIsAdminOpen(false)} />
+        </div>
+      )}
     </div>
   );
 }

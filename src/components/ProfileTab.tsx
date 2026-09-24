@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, CheckCircle2, LogOut, Send, MessageSquare, Volume2, VolumeX, Smartphone, Key } from 'lucide-react';
+import { User, CheckCircle2, LogOut, Send, MessageSquare, Volume2, VolumeX, Smartphone, Key, Lock, ShieldCheck } from 'lucide-react';
 import { UserProfile, APP_LOGO, TELEGRAM_CHANNEL_URL, DEVELOPER_TELEGRAM_URL } from '../types';
 import { soundFX } from '../utils/audio';
 
@@ -7,12 +7,14 @@ interface ProfileTabProps {
   profile: UserProfile;
   onLogout: () => void;
   onUpdateSound: (enabled: boolean) => void;
+  onOpenAdmin?: () => void;
 }
 
 export const ProfileTab: React.FC<ProfileTabProps> = ({
   profile,
   onLogout,
   onUpdateSound,
+  onOpenAdmin,
 }) => {
   const [soundEnabled, setSoundEnabled] = useState(profile.soundEnabled);
   const [showTelegramModal, setShowTelegramModal] = useState(false);
@@ -200,6 +202,19 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
           <MessageSquare className="w-4 h-4 text-emerald-400" />
           <span>CONTACT DEVELOPER</span>
         </button>
+
+        {onOpenAdmin && (
+          <button
+            onClick={() => {
+              soundFX.playClick();
+              onOpenAdmin();
+            }}
+            className="w-full py-3 px-4 bg-gradient-to-r from-red-950/80 via-black/90 to-red-950/80 hover:from-red-900/80 hover:to-red-900/80 border border-red-500/50 text-red-300 font-cyber font-bold text-xs uppercase tracking-widest rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all shadow-[0_0_15px_rgba(239,68,68,0.25)]"
+          >
+            <Lock className="w-4 h-4 text-red-400" />
+            <span>⚙️ ADMIN PANEL · KEY GENERATOR</span>
+          </button>
+        )}
 
         <button
           onClick={() => {

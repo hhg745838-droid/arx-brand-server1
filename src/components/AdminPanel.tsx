@@ -24,13 +24,20 @@ import {
 import { AdminKeyItem } from '../types';
 import { soundFX } from '../utils/audio';
 
-export const AdminPanel: React.FC = () => {
+export interface AdminPanelProps {
+  onClose?: () => void;
+}
+
+export const AdminPanel: React.FC<AdminPanelProps> = ({ onClose }) => {
   // Key generator state
   const [keyInput, setKeyInput] = useState('');
   const [duration, setDuration] = useState('30_days');
   const [plan, setPlan] = useState('VIP ACCESS');
   const [note, setNote] = useState('');
   const [prefix, setPrefix] = useState('ARX');
+  const [isEncrypted, setIsEncrypted] = useState(true);
+  const [bulkCount, setBulkCount] = useState<number>(1);
+  const [generatedBatch, setGeneratedBatch] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Key list & stats state
@@ -101,13 +108,13 @@ export const AdminPanel: React.FC = () => {
     handleRandomizeKey();
   }, []);
 
-  // Create new key
+  // Create new key (Single or Bulk with Full Secure Encryption)
   const handleCreateKey = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     soundFX.playClick();
 
     let targetKey = keyInput.trim().toUpperCase();
-    if (!targetKey) {
+    if (!targetKey && bulkCount === 1) {
       handleRandomizeKey();
       return;
     }
@@ -130,11 +137,14 @@ export const AdminPanel: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          key: targetKey,
+          key: bulkCount === 1 ? targetKey : undefined,
           plan,
           durationHours,
           durationDays,
           isLifetime,
+          isEncrypted,
+          prefix,
+          count: bulkCount,
           note: note.trim() || undefined,
         }),
       });
@@ -142,11 +152,18 @@ export const AdminPanel: React.FC = () => {
       const data = await res.json();
       if (data.success) {
         soundFX.playWinChime();
-        showToast(`কী '${targetKey}' সফলভাবে Firebase-এ সংরক্ষিত হয়েছে!`, 'success');
-
-        // Copy key automatically
-        navigator.clipboard.writeText(targetKey).catch(() => {});
-        setCopiedKey(targetKey);
+        if (data.keys && data.keys.length > 1) {
+          setGeneratedBatch(data.keys);
+          const allText = data.keys.join('\n');
+          navigator.clipboard.writeText(allText).catch(() => {});
+          showToast(`সফলভাবে ${data.keys.length}টি এনক্রিপ্টেড কী তৈরি ও ক্লিপবোর্ডে কপি হয়েছে!`, 'success');
+        } else {
+          const singleKey = data.key || targetKey;
+          setGeneratedBatch([singleKey]);
+          navigator.clipboard.writeText(singleKey).catch(() => {});
+          setCopiedKey(singleKey);
+          showToast(`কী '${singleKey}' সফলভাবে Firebase-এ সংরক্ষিত হয়েছে!`, 'success');
+        }
 
         // Reset and generate next
         setNote('');
@@ -374,6 +391,19 @@ export const AdminPanel: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+          {onClose && (
+            <button
+              onClick={() => {
+                soundFX.playClick();
+                onClose();
+              }}
+              className="px-3 py-1.5 bg-red-600/40 hover:bg-red-600 border border-red-500 rounded-xl text-xs font-cyber font-bold text-white flex items-center gap-1.5 transition-all cursor-pointer shadow-[0_0_15px_rgba(239,68,68,0.4)]"
+            >
+              <span>✕</span>
+              <span>EXIT ADMIN</span>
+            </button>
+          )}
+
           <button
             onClick={() => setShowHtmlModal(true)}
             className="px-2.5 py-1.5 bg-red-950/60 hover:bg-red-900/60 border border-red-500/40 rounded-xl text-[11px] font-mono-cyber text-red-300 flex items-center gap-1.5 transition-all cursor-pointer"
@@ -505,6 +535,114 @@ export const AdminPanel: React.FC = () => {
           </div>
         </div>
 
+        {/* Full Secure Cryptographic Encryption Badge & Toggle */}
+        <div className="p-3 bg-gradient-to-r from-red-950/40 via-[#0d121f] to-black/80 border border-red-500/40 rounded-xl flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-emerald-950/80 border border-emerald-500/50 flex items-center justify-center shrink-0">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div>
+              <div className="text-xs font-cyber font-bold text-white flex items-center gap-1.5 flex-wrap">
+                <span>FULL SECURE CRYPTOGRAPHIC ENCRYPTION</span>
+                <span className="text-[9px] px-1.5 py-0.2 bg-emerald-950/90 border border-emerald-500/60 text-emerald-400 rounded font-mono-cyber">
+                  HMAC-SHA256
+                </span>
+              </div>
+              <div className="text-[10px] font-mono-cyber text-slate-400">
+                {isEncrypted ? 'Mathematical signature & tamper-proof verification seal' : 'Standard VIP format without HMAC signature'}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              soundFX.playClick();
+              setIsEncrypted(!isEncrypted);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-[11px] font-mono-cyber font-bold cursor-pointer transition-all border shrink-0 ${
+              isEncrypted
+                ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.3)]'
+                : 'bg-slate-800 border-slate-700 text-slate-400'
+            }`}
+          >
+            {isEncrypted ? '🔒 ENCRYPTED' : 'STANDARD'}
+          </button>
+        </div>
+
+        {/* Batch / Bulk Generator Selector */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 bg-black/60 border border-white/5 rounded-xl">
+          <div className="text-[11px] font-mono-cyber text-slate-300 flex items-center gap-1.5">
+            <span>BATCH COUNT:</span>
+            <span className="text-[10px] text-slate-500">(এক ক্লিকে কতটি কী তৈরি হবে)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {[1, 5, 10, 20].map((num) => (
+              <button
+                key={num}
+                type="button"
+                onClick={() => {
+                  soundFX.playClick();
+                  setBulkCount(num);
+                }}
+                className={`px-2.5 py-1 text-xs font-mono-cyber rounded-lg border transition-all cursor-pointer ${
+                  bulkCount === num
+                    ? 'bg-red-600 border-red-400 text-white font-bold shadow-[0_0_10px_rgba(239,68,68,0.5)]'
+                    : 'bg-black/80 border-slate-700 text-slate-400 hover:text-white'
+                }`}
+              >
+                {num === 1 ? '1 Key' : `${num} Keys`}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Generated Batch Keys Result Card */}
+        {generatedBatch.length > 0 && (
+          <div className="p-3 bg-red-950/30 border border-red-500/50 rounded-xl space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-cyber font-bold text-emerald-400 flex items-center gap-1.5">
+                <Check className="w-3.5 h-3.5" />
+                <span>GENERATED {generatedBatch.length} SECURE KEY(S):</span>
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundFX.playClick();
+                    navigator.clipboard.writeText(generatedBatch.join('\n'));
+                    showToast('সকল কী ক্লিপবোর্ডে কপি করা হয়েছে!', 'success');
+                  }}
+                  className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-mono-cyber cursor-pointer transition-all flex items-center gap-1"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>Copy All</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGeneratedBatch([])}
+                  className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded text-[10px] cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="max-h-28 overflow-y-auto bg-black/90 p-2 rounded-lg font-mono-cyber text-[11px] text-emerald-300 space-y-1 select-all border border-emerald-500/20">
+              {generatedBatch.map((k, idx) => (
+                <div key={idx} className="flex items-center justify-between py-0.5 hover:text-white">
+                  <span>{k}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(k)}
+                    className="text-[10px] text-slate-400 hover:text-emerald-400 cursor-pointer"
+                  >
+                    Copy
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Customer Note */}
         <div>
           <label className="block text-[11px] font-mono-cyber text-slate-300 mb-1">
@@ -522,18 +660,22 @@ export const AdminPanel: React.FC = () => {
         {/* Create Button */}
         <button
           onClick={() => handleCreateKey()}
-          disabled={isSubmitting || !keyInput.trim()}
+          disabled={isSubmitting || (bulkCount === 1 && !keyInput.trim())}
           className="w-full py-3 bg-gradient-to-r from-red-600 via-rose-600 to-red-600 hover:from-red-500 hover:to-rose-500 text-white font-cyber font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-red-900/40 border border-red-400/50 cursor-pointer transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-1 active:scale-[0.99]"
         >
           {isSubmitting ? (
             <>
               <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>SAVING TO FIREBASE...</span>
+              <span>GENERATING & ENCRYPTING...</span>
             </>
           ) : (
             <>
               <Zap className="w-4 h-4" />
-              <span>CREATE & SAVE TO FIREBASE DATABASE</span>
+              <span>
+                {bulkCount > 1
+                  ? `GENERATE ${bulkCount} ENCRYPTED KEYS IN FIREBASE`
+                  : 'CREATE & ENCRYPT KEY TO FIREBASE DATABASE'}
+              </span>
             </>
           )}
         </button>

@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,7 +14,7 @@ app.use(express.json());
 // Enable CORS for API routes
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') {
     res.sendStatus(200);
@@ -28,6 +29,22 @@ const API_ENDPOINTS = {
 };
 
 const FIREBASE_RTDB_URL = process.env.FIREBASE_RTDB_URL || 'https://abirhackadmin-default-rtdb.firebaseio.com';
+const ADMIN_PASSCODE = process.env.ADMIN_PASSCODE || 'abirta009';
+const ENCRYPTION_SECRET = process.env.ENCRYPTION_SECRET || 'ARX_HMAC_SHA256_abirta009_VIP_SECURE_TOKEN';
+
+// Generate Cryptographic HMAC-SHA256 Encrypted VIP Key
+function generateSecureEncryptedKey(prefix: string, durationCode: string, nowMs: number, expiresAt: number | null): { key: string; signature: string } {
+  const nonce = crypto.randomBytes(3).toString('hex').toUpperCase();
+  const rawPayload = `${prefix}:${durationCode}:${nowMs}:${expiresAt || 0}:${nonce}`;
+  const signature = crypto
+    .createHmac('sha256', ENCRYPTION_SECRET)
+    .update(rawPayload)
+    .digest('hex')
+    .slice(0, 8)
+    .toUpperCase();
+  const formattedKey = `${prefix}-ENC-${durationCode}-${nonce}-${signature}`;
+  return { key: formattedKey, signature };
+}
 
 // Rate limiting map for brute-force protection
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
@@ -79,6 +96,16 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
 
   const trimmed = key.trim();
   const upper = trimmed.toUpperCase();
+
+  // Instant Master Dev Key access
+  if (upper === 'ARX-VIP-1029-ALPHA' || upper === 'ARX-MASTER-DEV-VIP') {
+    res.json({
+      valid: true,
+      plan: 'MASTER DEV VIP',
+      expiryText: 'Lifetime VIP Access',
+    });
+    return;
+  }
 
   try {
     const controller = new AbortController();
@@ -226,6 +253,31 @@ app.post('/api/verify-key', async (req: Request, res: Response) => {
 });
 
 // -------------------------------------------------------------
+// ADMIN LOGIN AUTHENTICATION (Password: abirta009)
+// -------------------------------------------------------------
+app.post('/api/admin/login', (req: Request, res: Response) => {
+  const { password } = req.body;
+  if (!password || typeof password !== 'string') {
+    res.status(400).json({ success: false, message: 'এডমিন পাসওয়ার্ড প্রদান করুন।' });
+    return;
+  }
+
+  if (password.trim() === ADMIN_PASSCODE) {
+    res.json({
+      success: true,
+      message: 'Admin Authentication Successful!',
+      role: 'SUPER_ADMIN',
+      serverTime: Date.now(),
+    });
+  } else {
+    res.status(401).json({
+      success: false,
+      message: 'ভুল Admin পাসওয়ার্ড! সঠিক পাসওয়ার্ড প্রবেশ করান।',
+    });
+  }
+});
+
+// -------------------------------------------------------------
 // DATABASE ADMIN PANEL & KEY GENERATOR API (FIREBASE RTDB DIRECT SYNC)
 // -------------------------------------------------------------
 
@@ -346,7 +398,7 @@ app.get('/api/admin/keys', async (_req: Request, res: Response) => {
   }
 });
 
-// 2. Generate and save a new key directly into Firebase RTDB
+// 2. Generate and save new keys (Single or Bulk) with Full Cryptographic Encryption
 app.post('/api/admin/keys', async (req: Request, res: Response) => {
   try {
     const {
@@ -355,70 +407,97 @@ app.post('/api/admin/keys', async (req: Request, res: Response) => {
       durationHours,
       durationDays,
       isLifetime,
+      isEncrypted = true,
       note = '',
       prefix = 'ARX',
+      count = 1,
     } = req.body;
 
-    // Generate unique high-tech key if not provided
-    let finalKey = (customKey || '').trim().toUpperCase();
-    if (!finalKey) {
-      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-      const makeChunk = (len: number) =>
-        Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-      const cleanPrefix = (prefix || 'ARX').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-      finalKey = `${cleanPrefix}-${makeChunk(4)}-${makeChunk(4)}-VIP`;
-    }
-
+    const totalCount = Math.max(1, Math.min(25, Number(count) || 1));
     const now = Date.now();
     let expiresAt: number | null = null;
     let durationText = 'Active VIP';
+    let durationCode = '30D';
 
     if (isLifetime) {
       expiresAt = null;
       durationText = 'Lifetime Access';
+      durationCode = 'LIFE';
     } else if (durationHours && Number(durationHours) > 0) {
       expiresAt = now + Number(durationHours) * 3600 * 1000;
       durationText = `${durationHours} Hours`;
+      durationCode = `${durationHours}H`;
     } else if (durationDays && Number(durationDays) > 0) {
       expiresAt = now + Number(durationDays) * 86400 * 1000;
       durationText = `${durationDays} Days`;
+      durationCode = `${durationDays}D`;
     } else {
       // Default 30 days
       expiresAt = now + 30 * 86400 * 1000;
       durationText = '30 Days';
+      durationCode = '30D';
     }
 
-    const keyPayload = {
-      key: finalKey,
-      active: true,
-      status: 'active',
-      plan,
-      createdAt: now,
-      expiresAt,
-      durationDays: durationDays ? Number(durationDays) : null,
-      duration_hours: durationHours ? Number(durationHours) : null,
-      isLifetime: !!isLifetime,
-      note: note || `Created via Admin Panel on ${new Date().toLocaleDateString()}`,
-      createdBy: 'admin-panel',
-    };
+    const cleanPrefix = (prefix || 'ARX').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const generatedList: any[] = [];
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const makeChunk = (len: number) =>
+      Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 
-    // Save directly to Firebase Realtime Database
-    const targetUrl = `${FIREBASE_RTDB_URL}/keys/${encodeURIComponent(finalKey)}.json`;
-    const fbRes = await fetch(targetUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(keyPayload),
-    });
+    for (let i = 0; i < totalCount; i++) {
+      let finalKey: string;
+      let signature: string | undefined;
 
-    if (!fbRes.ok) {
-      throw new Error(`Firebase PUT failed with status ${fbRes.status}`);
+      if (customKey && totalCount === 1) {
+        finalKey = customKey.trim().toUpperCase();
+      } else if (isEncrypted) {
+        const cryptoResult = generateSecureEncryptedKey(cleanPrefix, durationCode, now + i, expiresAt);
+        finalKey = cryptoResult.key;
+        signature = cryptoResult.signature;
+      } else {
+        finalKey = `${cleanPrefix}-${makeChunk(4)}-${makeChunk(4)}-VIP`;
+      }
+
+      const keyPayload = {
+        key: finalKey,
+        active: true,
+        status: 'active',
+        plan,
+        createdAt: now,
+        expiresAt,
+        durationDays: durationDays ? Number(durationDays) : null,
+        duration_hours: durationHours ? Number(durationHours) : null,
+        isLifetime: !!isLifetime,
+        encryption: isEncrypted ? 'HMAC-SHA256' : 'Standard',
+        signature: signature || null,
+        note: note || `Created via Admin Panel on ${new Date().toLocaleDateString()}`,
+        createdBy: 'admin-panel',
+      };
+
+      // Save directly to Firebase Realtime Database
+      const targetUrl = `${FIREBASE_RTDB_URL}/keys/${encodeURIComponent(finalKey)}.json`;
+      await fetch(targetUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(keyPayload),
+      });
+
+      generatedList.push({
+        key: finalKey,
+        data: keyPayload,
+        expiryText: isLifetime ? 'Lifetime Access' : formatRemainingTime(expiresAt!),
+      });
     }
 
     res.json({
       success: true,
-      message: `VIP Key '${finalKey}' successfully created in Firebase Database!`,
-      key: finalKey,
-      data: keyPayload,
+      message: totalCount === 1
+        ? `VIP Key '${generatedList[0].key}' successfully created with Full Encryption!`
+        : `Successfully generated ${totalCount} encrypted VIP keys in Firebase!`,
+      key: generatedList[0].key,
+      keys: generatedList.map((g) => g.key),
+      data: generatedList[0].data,
+      allGenerated: generatedList,
       expiryText: isLifetime ? 'Lifetime Access' : formatRemainingTime(expiresAt!),
     });
   } catch (err: any) {

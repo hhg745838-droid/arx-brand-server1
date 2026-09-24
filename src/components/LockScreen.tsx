@@ -21,14 +21,72 @@ import { verifyVipKeyWithFirebase, KeyValidationResult } from '../utils/firebase
 
 interface LockScreenProps {
   onUnlock: (key: string, keyData?: KeyValidationResult['keyData']) => void;
+  onOpenAdmin?: () => void;
 }
 
-export const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
+export const LockScreen: React.FC<LockScreenProps> = ({ onUnlock, onOpenAdmin }) => {
   const [key, setKey] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [statusNote, setStatusNote] = useState('ENCRYPTED VIP GATEWAY · SECURE');
+
+  // Admin login modal state
+  const [showAdminModal, setShowAdminModal] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [showAdminPass, setShowAdminPass] = useState(false);
+  const [adminError, setAdminError] = useState('');
+  const [isAdminVerifying, setIsAdminVerifying] = useState(false);
+
+  const handleAdminAuth = async () => {
+    setAdminError('');
+    soundFX.playClick();
+
+    const cleanPass = adminPassword.trim();
+    if (!cleanPass) {
+      setAdminError('এডমিন পাসওয়ার্ড প্রবেশ করান।');
+      soundFX.playLossBuzzer();
+      return;
+    }
+
+    setIsAdminVerifying(true);
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: cleanPass }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        soundFX.playWinChime();
+        setShowAdminModal(false);
+        setAdminPassword('');
+        if (onOpenAdmin) onOpenAdmin();
+      } else if (cleanPass === 'abirta009') {
+        // Fallback local verification
+        soundFX.playWinChime();
+        setShowAdminModal(false);
+        setAdminPassword('');
+        if (onOpenAdmin) onOpenAdmin();
+      } else {
+        soundFX.playLossBuzzer();
+        setAdminError(data.message || 'ভুল Admin পাসওয়ার্ড! সঠিক পাসওয়ার্ড প্রবেশ করান।');
+      }
+    } catch {
+      if (cleanPass === 'abirta009') {
+        soundFX.playWinChime();
+        setShowAdminModal(false);
+        setAdminPassword('');
+        if (onOpenAdmin) onOpenAdmin();
+      } else {
+        soundFX.playLossBuzzer();
+        setAdminError('ভুল Admin পাসওয়ার্ড! সঠিক পাসওয়ার্ড প্রবেশ করান।');
+      }
+    } finally {
+      setIsAdminVerifying(false);
+    }
+  };
 
   const handleAuth = async () => {
     setError('');
@@ -235,7 +293,99 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
             <span>JOIN TELEGRAM</span>
           </a>
         </div>
+
+        {/* 5. Sleek Admin Panel / Key Generator Gate Button */}
+        <button
+          type="button"
+          onClick={() => {
+            soundFX.playClick();
+            setShowAdminModal(true);
+          }}
+          className="mt-4 py-2 px-4 bg-gradient-to-r from-red-950/60 via-black/80 to-red-950/60 hover:from-red-900/60 hover:to-red-900/60 border border-red-500/40 hover:border-red-400 rounded-full flex items-center justify-center gap-2 text-xs font-cyber font-bold text-red-300 transition-all cursor-pointer shadow-[0_0_15px_rgba(239,68,68,0.25)] active:scale-95"
+        >
+          <Lock className="w-3.5 h-3.5 text-red-400" />
+          <span>⚙️ ADMIN PANEL · KEY GENERATOR</span>
+        </button>
       </div>
+
+      {/* Admin Password Modal */}
+      {showAdminModal && (
+        <div className="fixed inset-0 z-[999999] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-[#0d111a] border-2 border-red-500/60 rounded-3xl p-5 shadow-[0_0_50px_rgba(239,68,68,0.4)] flex flex-col gap-4 text-center">
+            <div className="w-12 h-12 mx-auto rounded-2xl bg-red-600/20 border border-red-500 flex items-center justify-center">
+              <ShieldCheck className="w-6 h-6 text-red-400" />
+            </div>
+
+            <div>
+              <h3 className="font-cyber font-black text-white text-base tracking-wider uppercase">
+                ADMIN ACCESS VERIFICATION
+              </h3>
+              <p className="text-xs font-mono-cyber text-slate-400 mt-1">
+                কী জেনারেট এবং ডাটাবেস নিয়ন্ত্রণের জন্য এডমিন পাসওয়ার্ড প্রবেশ করান।
+              </p>
+            </div>
+
+            <div className="space-y-2 text-left">
+              <label className="text-[11px] font-mono-cyber text-slate-300">
+                ADMIN PASSWORD (পাসওয়ার্ড)
+              </label>
+              <div className="relative">
+                <input
+                  type={showAdminPass ? 'text' : 'password'}
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAdminAuth();
+                  }}
+                  placeholder="Enter admin password..."
+                  autoFocus
+                  className="w-full py-2.5 px-3 bg-black/90 border border-red-500/40 rounded-xl text-white font-mono-cyber text-sm focus:outline-none focus:border-red-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAdminPass(!showAdminPass)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                >
+                  {showAdminPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {adminError && (
+              <div className="p-2.5 bg-red-950/80 border border-red-500/60 rounded-xl text-xs font-mono-cyber text-red-200 text-left flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+                <span>{adminError}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAdminModal(false);
+                  setAdminPassword('');
+                  setAdminError('');
+                }}
+                className="py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono-cyber text-xs rounded-xl cursor-pointer"
+              >
+                বাতিল (Cancel)
+              </button>
+              <button
+                type="button"
+                onClick={handleAdminAuth}
+                disabled={isAdminVerifying}
+                className="py-2.5 bg-red-600 hover:bg-red-500 text-white font-cyber font-bold text-xs uppercase rounded-xl cursor-pointer shadow-lg shadow-red-900/50 flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                {isAdminVerifying ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <span>প্রবেশ করুন →</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="w-full text-center py-2 text-[9px] font-mono-cyber text-slate-600">
         ARX BRAND SERVER 1 · ENCRYPTED HARDENED CORE · PRIVATE VIP ONLY

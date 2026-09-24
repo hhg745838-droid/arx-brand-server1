@@ -1,0 +1,8 @@
+{
+  "name": "ARX BRAND SERVER 1- AI Prediction Engine",
+  "description": "High-precision futuristic prediction engine with multi-model consensus, dynamic weights, historical logs, live draw analytics, and gaming portal integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Database, Cpu, Zap, Check, Sliders, ShieldAlert, Sparkles } from 'lucide-react';
+import { Database, Cpu, Zap, Sliders, ShieldAlert, Sparkles } from 'lucide-react';
 import { AIModelWeight, DrawItem, PredictionResult } from '../types';
 import { INITIAL_AI_MODELS, extractPatternString } from '../utils/engine';
 import { soundFX } from '../utils/audio';
@@ -10,7 +10,7 @@ interface DatabaseTabProps {
 }
 
 export const DatabaseTab: React.FC<DatabaseTabProps> = ({ history, prediction }) => {
-  const [models, setModels] = useState<AIModelWeight[]>(INITIAL_AI_MODELS);
+  const [models] = useState<AIModelWeight[]>(INITIAL_AI_MODELS);
   const [isAutoTuning, setIsAutoTuning] = useState(true);
 
   // Derive pattern from history
@@ -25,7 +25,7 @@ export const DatabaseTab: React.FC<DatabaseTabProps> = ({ history, prediction })
   return (
     <div className="relative w-full max-w-2xl mx-auto px-3.5 pb-28 pt-2 flex flex-col gap-4">
       {/* Background Cyber Watermark */}
-      <div className="cyber-watermark">
+      <div className="cyber-watermark pointer-events-none">
         <div>RAHMAN VA</div>
         <div>ADVANCE ADMIN</div>
       </div>
@@ -159,7 +159,6 @@ export const DatabaseTab: React.FC<DatabaseTabProps> = ({ history, prediction })
                   </div>
                 </div>
 
-                {/* Progress bar visual for weight & accuracy */}
                 <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800/80">
                   <div
                     className={`h-full rounded-full transition-all ${
@@ -177,7 +176,6 @@ export const DatabaseTab: React.FC<DatabaseTabProps> = ({ history, prediction })
           })}
         </div>
 
-        {/* Footer info badge */}
         <div className="mt-4 pt-3 border-t border-slate-800 text-center font-mono-cyber text-[10px] text-slate-500 uppercase tracking-widest flex items-center justify-center gap-2">
           <span>VERSION-X AI ENGINE</span>
           <span>·</span>

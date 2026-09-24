@@ -50,6 +50,7 @@ export interface HistoryRecord {
   id: string;
   period: string;
   server: ServerType;
+  gameMode?: GameMode;
   predictedSide: 'BIG' | 'SMALL';
   predictedNumber: number;
   actualNumber?: number;
@@ -80,4 +81,18 @@ export interface UserProfile {
   winStreak: number;
   soundEnabled: boolean;
   avatarUrl?: string;
+}
+
+export interface AdminKeyItem {
+  key: string;
+  active: boolean;
+  status: 'active' | 'inactive' | 'expired';
+  plan: string;
+  createdAt: number;
+  expiresAt: number | null;
+  expiryText: string;
+  durationText: string;
+  note?: string;
+  isLifetime?: boolean;
+  rawData?: any;
 }

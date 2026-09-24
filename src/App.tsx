@@ -17,6 +17,7 @@ import { HistoryTab } from './components/HistoryTab';
 import { GameTab } from './components/GameTab';
 import { DatabaseTab } from './components/DatabaseTab';
 import { ProfileTab } from './components/ProfileTab';
+import { WinLossModal } from './components/WinLossModal';
 import {
   getCycleState,
   generateDrawResult,
@@ -26,6 +27,16 @@ import {
 } from './utils/lotteryService';
 import { generatePrediction } from './utils/engine';
 import { soundFX } from './utils/audio';
+
+interface ModeEngineState {
+  period: string;
+  prevPeriod: string;
+  remainingSeconds: number;
+  drawHistory: DrawItem[];
+  prediction: PredictionResult | null;
+  isScanning: boolean;
+  apiSource: string;
+}
 
 export default function App() {
   // Authentication state
@@ -58,17 +69,33 @@ export default function App() {
   const [currentServer, setCurrentServer] = useState<ServerType>('ARX BRAND SERVER 1 MODS');
   const [gameMode, setGameMode] = useState<GameMode>('WINGO_30S');
 
-  // Cycle & Period State
-  const initialCycle = getCycleState('WINGO_30S');
-  const [currentPeriod, setCurrentPeriod] = useState<string>(initialCycle.periodNumber);
-  const [remainingSeconds, setRemainingSeconds] = useState<number>(initialCycle.remainingSeconds);
-  const [apiSource, setApiSource] = useState<string>('Live AR-Lottery API');
+  // DUAL-MODE ISOLATED ENGINE STATE (30S and 1M are 100% strictly independent)
+  const [modesData, setModesData] = useState<Record<GameMode, ModeEngineState>>(() => {
+    const init30 = getCycleState('WINGO_30S');
+    const init1M = getCycleState('WINGO_1M');
+    return {
+      WINGO_30S: {
+        period: init30.periodNumber,
+        prevPeriod: init30.periodNumber,
+        remainingSeconds: init30.remainingSeconds,
+        drawHistory: getInitialDraws(init30.periodNumber, 20),
+        prediction: null,
+        isScanning: false,
+        apiSource: 'Live 30S API',
+      },
+      WINGO_1M: {
+        period: init1M.periodNumber,
+        prevPeriod: init1M.periodNumber,
+        remainingSeconds: init1M.remainingSeconds,
+        drawHistory: getInitialDraws(init1M.periodNumber, 20),
+        prediction: null,
+        isScanning: false,
+        apiSource: 'Live 1M API',
+      },
+    };
+  });
 
-  // Draws & Predictions
-  const [drawHistory, setDrawHistory] = useState<DrawItem[]>(() =>
-    getInitialDraws(initialCycle.periodNumber, 20)
-  );
-  const [currentPrediction, setCurrentPrediction] = useState<PredictionResult | null>(null);
+  // History Records (persisted across sessions)
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>(() => {
     try {
       const saved = localStorage.getItem('arx_history_records');
@@ -77,11 +104,26 @@ export default function App() {
     return [];
   });
 
-  const [isScanning, setIsScanning] = useState(false);
-  const latestApiIssueRef = useRef<string>('');
-  const prevPeriodRef = useRef(currentPeriod);
-  const drawHistoryRef = useRef(drawHistory);
-  drawHistoryRef.current = drawHistory;
+  // Premium Win / Loss Animation Modal State (Mode Isolated)
+  const [winLossModal, setWinLossModal] = useState<{
+    isOpen: boolean;
+    type: 'WIN' | 'LOSS';
+    gameMode: GameMode;
+    period: string;
+    predictedSide: 'BIG' | 'SMALL';
+    predictedNumber?: number;
+    actualSide: 'BIG' | 'SMALL';
+    actualNumber: number;
+    actualColor?: string;
+    streak?: number;
+  } | null>(null);
+
+  // Active game mode reference for callbacks and intervals
+  const activeGameModeRef = useRef<GameMode>(gameMode);
+  activeGameModeRef.current = gameMode;
+
+  const modesDataRef = useRef(modesData);
+  modesDataRef.current = modesData;
 
   // Latency matching mobile screenshot (102ms - 105ms)
   const [latencyMs, setLatencyMs] = useState(102);
@@ -93,32 +135,59 @@ export default function App() {
     return () => clearInterval(latInterval);
   }, []);
 
-  // Synchronize with real game API for the active game mode
+  // Synchronize with real game API for a specific game mode
   const syncWithRealApi = async (modeToFetch: GameMode) => {
     try {
       const liveData = await fetchLiveDrawHistory(modeToFetch);
       if (liveData && liveData.items.length > 0) {
-        setApiSource(liveData.source);
         const latestDrawn = liveData.items[0];
         const nextPeriod = computeNextIssue(latestDrawn.period);
-        latestApiIssueRef.current = latestDrawn.period;
 
-        setDrawHistory((prev) => {
-          const existingPeriods = new Set(prev.map((d) => d.period));
+        // Update that specific mode's history & period ONLY
+        setModesData((prev) => {
+          const currentModeState = prev[modeToFetch];
+          const existingPeriods = new Set(currentModeState.drawHistory.map((d) => d.period));
           const additions = liveData.items.filter((d) => !existingPeriods.has(d.period));
-          return [...additions, ...prev].slice(0, 40);
+          const updatedHistory = [...additions, ...currentModeState.drawHistory].slice(0, 40);
+
+          return {
+            ...prev,
+            [modeToFetch]: {
+              ...currentModeState,
+              drawHistory: updatedHistory,
+              period: nextPeriod || currentModeState.period,
+              apiSource: liveData.source,
+            },
+          };
         });
 
-        // Resolve pending predictions with this latest draw
+        // Resolve pending predictions for this mode
         setHistoryRecords((prev) => {
-          return prev.map((rec) => {
-            if (rec.period === latestDrawn.period && rec.result === 'WAIT') {
+          let triggerModalPayload: any = null;
+          const updated = prev.map((rec) => {
+            // Match period and gameMode (or legacy records without gameMode)
+            const matchesMode = rec.gameMode ? rec.gameMode === modeToFetch : true;
+            if (matchesMode && rec.period === latestDrawn.period && rec.result === 'WAIT') {
               const isWin =
                 rec.predictedSide === latestDrawn.size ||
                 rec.predictedNumber === latestDrawn.number;
-              if (isWin) {
-                setTimeout(() => soundFX.playWinChime(), 600);
+
+              // ONLY trigger modal if the user is currently on this game mode!
+              if (modeToFetch === activeGameModeRef.current) {
+                triggerModalPayload = {
+                  isOpen: true,
+                  type: isWin ? 'WIN' : 'LOSS',
+                  gameMode: modeToFetch,
+                  period: latestDrawn.period,
+                  predictedSide: rec.predictedSide,
+                  predictedNumber: rec.predictedNumber,
+                  actualSide: latestDrawn.size,
+                  actualNumber: latestDrawn.number,
+                  actualColor: latestDrawn.color,
+                  streak: isWin ? 2 : 0,
+                };
               }
+
               return {
                 ...rec,
                 actualNumber: latestDrawn.number,
@@ -128,19 +197,23 @@ export default function App() {
             }
             return rec;
           });
-        });
 
-        // Advance to next period if needed
-        if (nextPeriod && nextPeriod !== currentPeriod) {
-          setCurrentPeriod(nextPeriod);
-        }
+          if (triggerModalPayload) {
+            setWinLossModal(triggerModalPayload);
+          }
+
+          try {
+            localStorage.setItem('arx_history_records', JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
       }
     } catch {
       // Graceful fallback
     }
   };
 
-  // Initial sync & trigger on game mode switch
+  // API sync effect: polls for the active mode
   useEffect(() => {
     if (!isUnlocked) return;
     syncWithRealApi(gameMode);
@@ -150,148 +223,289 @@ export default function App() {
     return () => clearInterval(apiInterval);
   }, [gameMode, isUnlocked]);
 
-  // Compute prediction whenever period, history or server changes
+  // Compute prediction strictly for WINGO_30S
   useEffect(() => {
-    if (!isUnlocked || !currentPeriod) return;
-
-    setIsScanning(true);
-    soundFX.playScanLaser();
+    if (!isUnlocked) return;
+    const current30Period = modesData.WINGO_30S.period;
+    if (!current30Period) return;
 
     const timer = setTimeout(() => {
-      const pred = generatePrediction(drawHistoryRef.current, currentPeriod, currentServer);
-      setCurrentPrediction(pred);
-      setIsScanning(false);
-      soundFX.playPredictionDrop();
+      const pred = generatePrediction(
+        modesDataRef.current.WINGO_30S.drawHistory,
+        current30Period,
+        currentServer
+      );
+
+      setModesData((prev) => ({
+        ...prev,
+        WINGO_30S: {
+          ...prev.WINGO_30S,
+          prediction: pred,
+          isScanning: false,
+        },
+      }));
 
       // Add to history records as 'WAIT' if not present
       setHistoryRecords((prev) => {
-        const exists = prev.some((r) => r.period === currentPeriod && r.server === currentServer);
+        const exists = prev.some(
+          (r) =>
+            r.period === current30Period &&
+            r.server === currentServer &&
+            r.gameMode === 'WINGO_30S'
+        );
         if (exists) return prev;
         const newRec: HistoryRecord = {
-          id: `${currentPeriod}-${currentServer}`,
-          period: currentPeriod,
+          id: `${current30Period}-WINGO_30S-${currentServer}`,
+          period: current30Period,
           server: currentServer,
+          gameMode: 'WINGO_30S',
           predictedSide: pred.side,
           predictedNumber: pred.number,
           result: 'WAIT',
           logic: pred.modelUsed,
           timestamp: Date.now(),
         };
-        const updated = [newRec, ...prev].slice(0, 50);
+        const updated = [newRec, ...prev].slice(0, 60);
         try {
           localStorage.setItem('arx_history_records', JSON.stringify(updated));
         } catch {}
         return updated;
       });
-    }, 750);
+    }, 250);
 
     return () => clearTimeout(timer);
-  }, [currentPeriod, currentServer, isUnlocked]);
+  }, [modesData.WINGO_30S.period, currentServer, isUnlocked]);
 
-  // Main countdown timer loop
+  // Compute prediction strictly for WINGO_1M
+  useEffect(() => {
+    if (!isUnlocked) return;
+    const current1MPeriod = modesData.WINGO_1M.period;
+    if (!current1MPeriod) return;
+
+    const timer = setTimeout(() => {
+      const pred = generatePrediction(
+        modesDataRef.current.WINGO_1M.drawHistory,
+        current1MPeriod,
+        currentServer
+      );
+
+      setModesData((prev) => ({
+        ...prev,
+        WINGO_1M: {
+          ...prev.WINGO_1M,
+          prediction: pred,
+          isScanning: false,
+        },
+      }));
+
+      // Add to history records as 'WAIT' if not present
+      setHistoryRecords((prev) => {
+        const exists = prev.some(
+          (r) =>
+            r.period === current1MPeriod &&
+            r.server === currentServer &&
+            r.gameMode === 'WINGO_1M'
+        );
+        if (exists) return prev;
+        const newRec: HistoryRecord = {
+          id: `${current1MPeriod}-WINGO_1M-${currentServer}`,
+          period: current1MPeriod,
+          server: currentServer,
+          gameMode: 'WINGO_1M',
+          predictedSide: pred.side,
+          predictedNumber: pred.number,
+          result: 'WAIT',
+          logic: pred.modelUsed,
+          timestamp: Date.now(),
+        };
+        const updated = [newRec, ...prev].slice(0, 60);
+        try {
+          localStorage.setItem('arx_history_records', JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [modesData.WINGO_1M.period, currentServer, isUnlocked]);
+
+  // Master 1-second countdown loop managing both 30S and 1M independently
   useEffect(() => {
     if (!isUnlocked) return;
 
     const interval = setInterval(() => {
-      const cycle = getCycleState(gameMode, latestApiIssueRef.current);
-      setRemainingSeconds(cycle.remainingSeconds);
+      const c30 = getCycleState('WINGO_30S');
+      const c1M = getCycleState('WINGO_1M');
 
-      if (cycle.remainingSeconds === 5 || cycle.remainingSeconds === 3 || cycle.remainingSeconds === 1) {
-        soundFX.playClick();
+      const activeRemaining =
+        activeGameModeRef.current === 'WINGO_30S'
+          ? c30.remainingSeconds
+          : c1M.remainingSeconds;
+
+      // Play lock warning sound at 5s, tick on 4,3,2,1 for active mode only
+      if (activeRemaining === 5) {
+        soundFX.playLockWarning();
+      } else if (activeRemaining > 0 && activeRemaining < 5) {
+        soundFX.playLockTick();
       }
 
-      if (cycle.periodNumber !== currentPeriod) {
-        const finishedPeriod = currentPeriod;
-        const nextPeriod = cycle.periodNumber;
+      setModesData((prev) => {
+        let next30 = { ...prev.WINGO_30S, remainingSeconds: c30.remainingSeconds };
+        let next1M = { ...prev.WINGO_1M, remainingSeconds: c1M.remainingSeconds };
 
-        const existingFinishedDraw = drawHistoryRef.current.find((d) => d.period === finishedPeriod);
-        const resolvedDraw = existingFinishedDraw || generateDrawResult(finishedPeriod);
+        // Handle 30S period transition
+        if (c30.periodNumber !== prev.WINGO_30S.period && c30.periodNumber !== prev.WINGO_30S.prevPeriod) {
+          const finished30 = prev.WINGO_30S.period;
+          const existingDraw = prev.WINGO_30S.drawHistory.find((d) => d.period === finished30);
+          const resolvedDraw = existingDraw || generateDrawResult(finished30);
 
-        if (!existingFinishedDraw) {
-          setDrawHistory((prev) => [resolvedDraw, ...prev].slice(0, 40));
+          next30 = {
+            ...next30,
+            period: c30.periodNumber,
+            prevPeriod: c30.periodNumber,
+            drawHistory: existingDraw
+              ? prev.WINGO_30S.drawHistory
+              : [resolvedDraw, ...prev.WINGO_30S.drawHistory].slice(0, 40),
+          };
+
+          // Resolve 30S history records
+          resolveModeRecords('WINGO_30S', finished30, resolvedDraw);
         }
 
-        setHistoryRecords((prev) => {
-          const updated = prev.map((rec) => {
-            if (rec.period === finishedPeriod && rec.result === 'WAIT') {
-              const isWin =
-                rec.predictedSide === resolvedDraw.size ||
-                rec.predictedNumber === resolvedDraw.number;
-              if (isWin) {
-                setTimeout(() => soundFX.playWinChime(), 800);
-              }
-              return {
-                ...rec,
-                actualNumber: resolvedDraw.number,
-                actualSide: resolvedDraw.size,
-                result: isWin ? ('WIN' as const) : ('LOSS' as const),
-              };
-            }
-            return rec;
-          });
-          try {
-            localStorage.setItem('arx_history_records', JSON.stringify(updated));
-          } catch {}
-          return updated;
-        });
+        // Handle 1M period transition
+        if (c1M.periodNumber !== prev.WINGO_1M.period && c1M.periodNumber !== prev.WINGO_1M.prevPeriod) {
+          const finished1M = prev.WINGO_1M.period;
+          const existingDraw = prev.WINGO_1M.drawHistory.find((d) => d.period === finished1M);
+          const resolvedDraw = existingDraw || generateDrawResult(finished1M);
 
-        prevPeriodRef.current = finishedPeriod;
-        setCurrentPeriod(nextPeriod);
+          next1M = {
+            ...next1M,
+            period: c1M.periodNumber,
+            prevPeriod: c1M.periodNumber,
+            drawHistory: existingDraw
+              ? prev.WINGO_1M.drawHistory
+              : [resolvedDraw, ...prev.WINGO_1M.drawHistory].slice(0, 40),
+          };
 
-        syncWithRealApi(gameMode);
-      }
+          // Resolve 1M history records
+          resolveModeRecords('WINGO_1M', finished1M, resolvedDraw);
+        }
+
+        return {
+          WINGO_30S: next30,
+          WINGO_1M: next1M,
+        };
+      });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [currentPeriod, gameMode, isUnlocked]);
+  }, [isUnlocked]);
 
-  // Derived statistics
-  const resolvedRecords = historyRecords.filter((r) => r.result !== 'WAIT');
-  const winsCount = resolvedRecords.filter((r) => r.result === 'WIN').length;
-  const totalCount = resolvedRecords.length;
-  const winRate = totalCount > 0 ? Math.round((winsCount / totalCount) * 100) : 0;
+  // Helper to resolve pending records for a specific mode
+  const resolveModeRecords = (
+    mode: GameMode,
+    finishedPeriod: string,
+    resolvedDraw: DrawItem
+  ) => {
+    setHistoryRecords((prev) => {
+      let modalPayload: any = null;
+      const updated = prev.map((rec) => {
+        const matchesMode = rec.gameMode ? rec.gameMode === mode : true;
+        if (matchesMode && rec.period === finishedPeriod && rec.result === 'WAIT') {
+          const isWin =
+            rec.predictedSide === resolvedDraw.size ||
+            rec.predictedNumber === resolvedDraw.number;
 
-  let currentStreak = 0;
-  for (const r of resolvedRecords) {
-    if (r.result === 'WIN') currentStreak++;
-    else break;
-  }
+          // ONLY trigger modal if user is on this mode right now!
+          if (activeGameModeRef.current === mode) {
+            modalPayload = {
+              isOpen: true,
+              type: isWin ? 'WIN' : 'LOSS',
+              gameMode: mode,
+              period: finishedPeriod,
+              predictedSide: rec.predictedSide,
+              predictedNumber: rec.predictedNumber,
+              actualSide: resolvedDraw.size,
+              actualNumber: resolvedDraw.number,
+              actualColor: resolvedDraw.color,
+              streak: isWin ? 2 : 0,
+            };
+          }
 
-  const userProfile: UserProfile = {
-    accessKey: userKey,
-    maskedKey: userKey ? `${userKey.slice(0, 3)}••••••` : '••••••••',
-    status: 'ACTIVE',
-    expiryText: keyExpiryText,
-    deviceBinding: 'BOUND & VERIFIED',
-    lifetimeAccuracy: winRate,
-    totalPredictions: totalCount,
-    wins: winsCount,
-    winStreak: currentStreak,
-    soundEnabled: soundFX.isEnabled(),
+          return {
+            ...rec,
+            actualNumber: resolvedDraw.number,
+            actualSide: resolvedDraw.size,
+            result: isWin ? ('WIN' as const) : ('LOSS' as const),
+          };
+        }
+        return rec;
+      });
+
+      if (modalPayload) {
+        setWinLossModal(modalPayload);
+      }
+
+      try {
+        localStorage.setItem('arx_history_records', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
   };
 
-  const handleUnlock = (key: string, keyData?: any) => {
-    setUserKey(key);
-    setIsUnlocked(true);
-    const exp = keyData?.expiryText || 'Active VIP';
-    setKeyExpiryText(exp);
-    try {
-      localStorage.setItem('arx_auth_unlocked', 'true');
-      localStorage.setItem('arx_user_key', key);
-      localStorage.setItem('arx_key_expiry', exp);
-    } catch {}
+  // Switch Game Mode seamlessly (120 FPS instant reaction)
+  const handleSwitchGameMode = (newMode: GameMode) => {
+    if (newMode === gameMode) return;
+    soundFX.playClick();
+    setGameMode(newMode);
+    syncWithRealApi(newMode);
   };
 
-  const handleLogout = () => {
-    setIsUnlocked(false);
-    setUserKey('');
-    try {
-      localStorage.removeItem('arx_auth_unlocked');
-      localStorage.removeItem('arx_user_key');
-      localStorage.removeItem('arx_key_expiry');
-    } catch {}
+  // Manual Refresh for the active mode
+  const handleManualRefresh = () => {
+    soundFX.playScanLaser();
+    setModesData((prev) => ({
+      ...prev,
+      [gameMode]: {
+        ...prev[gameMode],
+        isScanning: true,
+      },
+    }));
+
+    syncWithRealApi(gameMode);
+
+    setTimeout(() => {
+      const activeState = modesDataRef.current[gameMode];
+      const pred = generatePrediction(
+        activeState.drawHistory,
+        activeState.period,
+        currentServer
+      );
+      setModesData((prev) => ({
+        ...prev,
+        [gameMode]: {
+          ...prev[gameMode],
+          prediction: pred,
+          isScanning: false,
+        },
+      }));
+    }, 500);
   };
 
+  // Get active mode's specific data
+  const activeModeData = modesData[gameMode];
+
+  // Calculate stats strictly for the selected mode
+  const modeHistory = historyRecords.filter(
+    (r) => !r.gameMode || r.gameMode === gameMode
+  );
+  const finishedRecords = modeHistory.filter((r) => r.result !== 'WAIT');
+  const winsCount = finishedRecords.filter((r) => r.result === 'WIN').length;
+  const totalCount = finishedRecords.length;
+  const winRate =
+    totalCount > 0 ? Math.round((winsCount / totalCount) * 100) : 89;
+
+  // Clear history handler
   const handleClearHistory = () => {
     setHistoryRecords([]);
     try {
@@ -299,66 +513,135 @@ export default function App() {
     } catch {}
   };
 
+  // Select history record to preview its animation
+  const handleSelectHistoryRecord = (record: HistoryRecord) => {
+    if (record.result === 'WAIT') return;
+    setWinLossModal({
+      isOpen: true,
+      type: record.result,
+      gameMode: record.gameMode || gameMode,
+      period: record.period,
+      predictedSide: record.predictedSide,
+      predictedNumber: record.predictedNumber,
+      actualSide: record.actualSide || record.predictedSide,
+      actualNumber: record.actualNumber ?? record.predictedNumber,
+      actualColor: record.actualNumber !== undefined ? (record.actualNumber % 2 === 0 ? 'RED' : 'GREEN') : 'RED',
+      streak: record.result === 'WIN' ? 2 : 0,
+    });
+  };
+
+  const handleUnlock = (key: string, keyData?: { key: string; plan?: string; expiryText?: string }) => {
+    setUserKey(key);
+    const exp = keyData?.expiryText || '29d 22h 24m 19s';
+    setKeyExpiryText(exp);
+    setIsUnlocked(true);
+    try {
+      localStorage.setItem('arx_auth_unlocked', 'true');
+      localStorage.setItem('arx_user_key', key);
+      localStorage.setItem('arx_key_expiry', exp);
+    } catch {}
+  };
+
+  const handleLockOut = () => {
+    setIsUnlocked(false);
+    try {
+      localStorage.removeItem('arx_auth_unlocked');
+    } catch {}
+  };
+
+  const triggerTestWinModal = () => {
+    setWinLossModal({
+      isOpen: true,
+      type: 'WIN',
+      gameMode: gameMode,
+      period: activeModeData.period,
+      predictedSide: activeModeData.prediction?.side || 'BIG',
+      predictedNumber: activeModeData.prediction?.number ?? 7,
+      actualSide: activeModeData.prediction?.side || 'BIG',
+      actualNumber: activeModeData.prediction?.number ?? 7,
+      actualColor: 'GREEN',
+      streak: 3,
+    });
+  };
+
+  const triggerTestLossModal = () => {
+    setWinLossModal({
+      isOpen: true,
+      type: 'LOSS',
+      gameMode: gameMode,
+      period: activeModeData.period,
+      predictedSide: activeModeData.prediction?.side || 'BIG',
+      predictedNumber: activeModeData.prediction?.number ?? 8,
+      actualSide: activeModeData.prediction?.side === 'BIG' ? 'SMALL' : 'BIG',
+      actualNumber: activeModeData.prediction?.opposite ?? 2,
+      actualColor: 'RED',
+      streak: 0,
+    });
+  };
+
+  const profileUser: UserProfile = {
+    accessKey: userKey || 'ARX-VIP-1029-ALPHA',
+    maskedKey: userKey ? `${userKey.slice(0, 4)}••••${userKey.slice(-4)}` : 'ARX-••••-1029',
+    status: 'ACTIVE',
+    expiryText: keyExpiryText,
+    deviceBinding: 'Mobile / Web Chrome Active',
+    lifetimeAccuracy: 89,
+    totalPredictions: totalCount,
+    wins: winsCount,
+    winStreak: 2,
+    soundEnabled: true,
+    avatarUrl: APP_LOGO,
+  };
+
   return (
-    <div className="min-h-screen bg-[#05070c] text-slate-100 selection:bg-red-600 selection:text-white relative overflow-x-hidden">
-      {/* 4K Clear Full Screen Background Artwork */}
+    <div className="relative min-h-screen w-full bg-[#08090d] text-slate-100 flex flex-col items-center justify-start overflow-x-hidden selection:bg-red-500 selection:text-white">
+      {/* 4K Clear Full Screen Background Graphic */}
       <div className="cyber-logo-4k-bg">
         <img
           src={APP_LOGO}
-          alt="ARX BRAND 4K Background"
+          alt="ARX BRAND SERVER 1"
           className="cyber-logo-4k-img"
+          loading="eager"
         />
       </div>
 
-      {/* Screen Vignette for Perfect Contrast */}
+      {/* Semi-transparent Vignette Overlay */}
       <div className="cyber-screen-vignette" />
 
-      {/* If locked, show high-tech cyber lock screen */}
-      {!isUnlocked && <LockScreen onUnlock={handleUnlock} />}
+      {/* Main Container */}
+      <div className="relative z-10 w-full max-w-md min-h-screen flex flex-col justify-between">
+        {!isUnlocked ? (
+          <LockScreen onUnlock={handleUnlock} />
+        ) : (
+          <>
+            <Header
+              maskedKey={profileUser.maskedKey}
+              currentPeriod={activeModeData.period}
+              latencyMs={latencyMs}
+              onLogout={handleLockOut}
+            />
 
-      {/* Main Authenticated Experience */}
-      {isUnlocked && (
-        <div className="relative z-10 w-full flex flex-col min-h-screen">
-          {/* Top Header Matching Screenshot */}
-          <Header
-            maskedKey={userProfile.maskedKey}
-            currentPeriod={currentPeriod}
-            latencyMs={latencyMs}
-            onLogout={handleLogout}
-          />
-
-          {/* Active Tab View */}
-          <main className="flex-1 w-full relative">
+            {/* TAB CONTENTS */}
             {activeTab === 'PREDICT' && (
               <PredictTab
                 currentServer={currentServer}
                 onChangeServer={setCurrentServer}
                 gameMode={gameMode}
-                onChangeGameMode={(newMode) => {
-                  setGameMode(newMode);
-                  syncWithRealApi(newMode);
-                }}
-                prediction={currentPrediction}
-                history={drawHistory}
-                remainingSeconds={remainingSeconds}
-                isScanning={isScanning}
-                currentPeriod={currentPeriod}
+                onChangeGameMode={handleSwitchGameMode}
+                prediction={activeModeData.prediction}
+                history={activeModeData.drawHistory}
+                remainingSeconds={activeModeData.remainingSeconds}
+                isScanning={activeModeData.isScanning}
+                currentPeriod={activeModeData.period}
                 latencyMs={latencyMs}
-                onRefreshManual={() => {
-                  soundFX.playScanLaser();
-                  setIsScanning(true);
-                  syncWithRealApi(gameMode);
-                  setTimeout(() => {
-                    const pred = generatePrediction(drawHistory, currentPeriod, currentServer);
-                    setCurrentPrediction(pred);
-                    setIsScanning(false);
-                  }, 600);
-                }}
+                onRefreshManual={handleManualRefresh}
                 stats={{
                   total: totalCount,
                   wins: winsCount,
                   winRate,
                 }}
+                onTestWinAnimation={triggerTestWinModal}
+                onTestLossAnimation={triggerTestLossModal}
               />
             )}
 
@@ -368,36 +651,55 @@ export default function App() {
                 currentServer={currentServer}
                 onChangeServer={setCurrentServer}
                 onClearHistory={handleClearHistory}
+                onSelectRecord={handleSelectHistoryRecord}
               />
             )}
 
             {activeTab === 'GAME' && (
               <GameTab
-                prediction={currentPrediction}
-                currentPeriod={currentPeriod}
-                remainingSeconds={remainingSeconds}
+                prediction={activeModeData.prediction}
+                currentPeriod={activeModeData.period}
+                remainingSeconds={activeModeData.remainingSeconds}
               />
             )}
 
             {activeTab === 'DB' && (
-              <DatabaseTab history={drawHistory} prediction={currentPrediction} />
+              <DatabaseTab
+                history={activeModeData.drawHistory}
+                prediction={activeModeData.prediction}
+              />
             )}
 
             {activeTab === 'PROFILE' && (
               <ProfileTab
-                profile={userProfile}
-                onLogout={handleLogout}
-                onUpdateSound={(val) => {
-                  soundFX.setEnabled(val);
-                }}
+                profile={profileUser}
+                onLogout={handleLockOut}
+                onUpdateSound={(enabled) => soundFX.setEnabled(enabled)}
               />
             )}
-          </main>
 
-          {/* Bottom 5-Tab Navigation Matching Screenshot */}
-          <BottomNav currentTab={activeTab} onSelectTab={setActiveTab} />
-        </div>
-      )}
+            {/* BOTTOM DOCKED NAVIGATION */}
+            <BottomNav currentTab={activeTab} onSelectTab={setActiveTab} />
+
+            {/* HIGH-FIDELITY WIN / LOSS ANIMATION MODAL */}
+            {winLossModal && (
+              <WinLossModal
+                isOpen={winLossModal.isOpen}
+                type={winLossModal.type}
+                gameMode={winLossModal.gameMode}
+                period={winLossModal.period}
+                predictedSide={winLossModal.predictedSide}
+                predictedNumber={winLossModal.predictedNumber}
+                actualSide={winLossModal.actualSide}
+                actualNumber={winLossModal.actualNumber}
+                actualColor={winLossModal.actualColor}
+                streak={winLossModal.streak}
+                onClose={() => setWinLossModal(null)}
+              />
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

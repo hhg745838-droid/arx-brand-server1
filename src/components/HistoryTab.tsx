@@ -8,6 +8,7 @@ interface HistoryTabProps {
   currentServer: ServerType;
   onChangeServer: (server: ServerType) => void;
   onClearHistory: () => void;
+  onSelectRecord?: (record: HistoryRecord) => void;
 }
 
 type FilterType = 'ALL' | 'WIN' | 'LOSS' | 'WAIT' | 'SKIPPED';
@@ -17,6 +18,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   currentServer,
   onChangeServer,
   onClearHistory,
+  onSelectRecord,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<FilterType>('ALL');
@@ -186,11 +188,29 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               return (
                 <div
                   key={item.id}
-                  className="grid grid-cols-12 gap-2 px-3 py-2.5 items-center font-mono-cyber text-xs hover:bg-slate-900/40 transition-colors"
+                  onClick={() => {
+                    if (!isWait && onSelectRecord) {
+                      soundFX.playClick();
+                      onSelectRecord(item);
+                    }
+                  }}
+                  className={`grid grid-cols-12 gap-2 px-3 py-2.5 items-center font-mono-cyber text-xs hover:bg-slate-900/60 transition-colors ${
+                    !isWait ? 'cursor-pointer hover:border-slate-700' : ''
+                  }`}
+                  title={!isWait ? 'Click to preview result animation' : undefined}
                 >
                   {/* Period */}
-                  <div className="col-span-3 text-slate-300 font-semibold text-[11px]">
-                    {item.period.length > 4 ? `...${item.period.slice(-4)}` : item.period}
+                  <div className="col-span-3 text-slate-300 font-semibold text-[11px] flex items-center gap-1 truncate">
+                    <span
+                      className={`text-[8px] px-1 py-0.2 rounded border font-mono shrink-0 ${
+                        item.gameMode === 'WINGO_1M'
+                          ? 'bg-cyan-950/60 text-cyan-300 border-cyan-500/30'
+                          : 'bg-rose-950/60 text-rose-300 border-rose-500/30'
+                      }`}
+                    >
+                      {item.gameMode === 'WINGO_1M' ? '1M' : '30S'}
+                    </span>
+                    <span>{item.period.length > 4 ? `...${item.period.slice(-4)}` : item.period}</span>
                   </div>
 
                   {/* Predicted */}

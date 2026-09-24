@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ARX BRAND SERVER 1 - VIP Key Admin Panel</title>
+  <link rel="icon" type="image/png" href="https://i.postimg.cc/sxB74TxX/file-00000000097c81f5abb566d8a5f9d2ff.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: #05070c;
+      color: #f1f5f9;
+    }
+    .font-cyber { font-family: 'Orbitron', sans-serif; }
+    .font-mono-cyber { font-family: 'Space Mono', monospace; }
+    .glass-card {
+      background: rgba(13, 17, 26, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+    }
+    .glass-inner {
+      background: rgba(8, 10, 16, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .glow-red {
+      box-shadow: 0 0 25px rgba(239, 68, 68, 0.35);
+    }
+    .glow-green {
+      box-shadow: 0 0 20px rgba(34, 197, 94, 0.25);
+    }
+  </style>
+</head>
+<body class="min-h-screen pb-16 selection:bg-red-600 selection:text-white">
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed top-5 right-5 z-50 transform translate-x-96 transition-all duration-300 pointer-events-none">
+    <div id="toastContent" class="px-4 py-3 rounded-xl border border-red-500/50 bg-[#0c0f18] text-white shadow-2xl font-mono-cyber text-xs flex items-center gap-2">
+      <span id="toastIcon">⚡</span>
+      <span id="toastMsg">Operation successful</span>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header class="border-b border-red-500/20 bg-[#070910]/90 backdrop-blur-md sticky top-0 z-40">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <img src="https://i.postimg.cc/sxB74TxX/file-00000000097c81f5abb566d8a5f9d2ff.png" alt="ARX Logo" class="w-10 h-10 rounded-xl border border-red-500/40 p-0.5 object-cover" />
+        <div>
+          <div class="font-cyber font-black text-sm sm:text-base tracking-wider text-white flex items-center gap-2">
+            <span>ARX BRAND SERVER 1</span>
+            <span class="text-[10px] bg-red-600/30 text-red-400 px-2 py-0.5 rounded border border-red-500/40 font-mono-cyber">ADMIN V2.5</span>
+          </div>
+          <div class="text-[11px] font-mono-cyber text-slate-400 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>FIREBASE RTDB DATABASE CONNECTED</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button onclick="fetchKeysFromFirebase()" class="px-3 py-1.5 bg-red-950/60 hover:bg-red-900/60 border border-red-500/40 rounded-xl text-xs font-mono-cyber text-red-300 flex items-center gap-1.5 transition-all cursor-pointer">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          <span class="hidden sm:inline">Refresh Sync</span>
+        </button>
+        <button onclick="toggleConfigModal(true)" class="p-2 bg-slate-900 border border-slate-700 hover:border-slate-500 rounded-xl text-slate-300 transition-all cursor-pointer" title="Firebase Settings">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="max-w-6xl mx-auto px-4 py-6 flex flex-col gap-6">
+    
+    <!-- Top Stats Banner -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="glass-card p-3.5 rounded-2xl">
+        <div class="text-[10px] font-mono-cyber text-slate-400 uppercase tracking-widest">Total VIP Keys</div>
+        <div id="statTotal" class="font-cyber font-black text-2xl text-white mt-1">--</div>
+        <div class="text-[10px] text-slate-500 mt-0.5">Firebase Synced</div>
+      </div>
+      <div class="glass-card p-3.5 rounded-2xl border-emerald-500/30">
+        <div class="text-[10px] font-mono-cyber text-emerald-400 uppercase tracking-widest">Active Keys</div>
+        <div id="statActive" class="font-cyber font-black text-2xl text-emerald-400 mt-1">--</div>
+        <div class="text-[10px] text-emerald-500/70 mt-0.5">Ready to Login</div>
+      </div>
+      <div class="glass-card p-3.5 rounded-2xl border-amber-500/30">
+        <div class="text-[10px] font-mono-cyber text-amber-400 uppercase tracking-widest">Expired Keys</div>
+        <div id="statExpired" class="font-cyber font-black text-2xl text-amber-400 mt-1">--</div>
+        <div class="text-[10px] text-amber-500/70 mt-0.5">Needs Renewal</div>
+      </div>
+      <div class="glass-card p-3.5 rounded-2xl border-red-500/30">
+        <div class="text-[10px] font-mono-cyber text-red-400 uppercase tracking-widest">Firebase Ping</div>
+        <div id="statPing" class="font-cyber font-black text-2xl text-red-400 mt-1">~102ms</div>
+        <div id="statDbName" class="text-[10px] text-slate-500 mt-0.5 truncate">abirhackadmin-default-rtdb</div>
+      </div>
+    </div>
+
+    <!-- Generator & Action Section -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      
+      <!-- Key Generator Box (Left/Main column) -->
+      <div class="lg:col-span-1 glass-card p-5 rounded-3xl glow-red flex flex-col gap-4">
+        <div class="flex items-center justify-between border-b border-white/10 pb-3">
+          <div class="flex items-center gap-2">
+            <span class="text-xl">⚡</span>
+            <h2 class="font-cyber font-bold text-sm tracking-wider text-white uppercase">GENERATE VIP KEY</h2>
+          </div>
+          <span class="text-[10px] font-mono-cyber text-red-400 bg-red-950/80 px-2 py-0.5 rounded border border-red-500/40">ONLINE DB</span>
+        </div>
+
+        <!-- Custom Key / Auto Key Switcher -->
+        <div>
+          <label class="block text-[11px] font-mono-cyber text-slate-300 mb-1.5">KEY CODE (অটো বা কাস্টম কী)</label>
+          <div class="flex gap-2">
+            <input type="text" id="inputKeyName" placeholder="ARX-XXXX-XXXX-VIP" class="w-full px-3 py-2.5 rounded-xl bg-black/70 border border-red-500/40 text-white font-mono-cyber text-xs tracking-wider uppercase focus:outline-none focus:border-red-400 focus:ring-1 focus:ring-red-400" />
+            <button onclick="randomizeKey()" class="px-3 py-2 bg-red-600 hover:bg-red-500 text-white font-mono-cyber text-xs rounded-xl font-bold cursor-pointer transition-all shrink-0" title="Randomize Key">
+              🎲 Auto
+            </button>
+          </div>
+        </div>
+
+        <!-- Duration Selection -->
+        <div>
+          <label class="block text-[11px] font-mono-cyber text-slate-300 mb-1.5">DURATION (মেয়াদ নির্বাচন)</label>
+          <select id="selectDuration" onchange="handleDurationChange()" class="w-full px-3 py-2.5 rounded-xl bg-black/70 border border-slate-700 text-white font-mono-cyber text-xs focus:outline-none focus:border-red-400 cursor-pointer">
+            <option value="1_hours">1 Hour Access (১ ঘন্টা)</option>
+            <option value="4_hours">4 Hours Access (৪ ঘন্টা)</option>
+            <option value="24_hours">24 Hours / 1 Day (১ দিন)</option>
+            <option value="3_days">3 Days Access (৩ দিন)</option>
+            <option value="7_days">7 Days Access (৭ দিন)</option>
+            <option value="30_days" selected>30 Days Standard (১ মাস)</option>
+            <option value="90_days">90 Days VIP (৩ মাস)</option>
+            <option value="365_days">1 Year Access (১ বছর)</option>
+            <option value="lifetime">Lifetime Access (আজীবন আনলিমিটেড)</option>
+          </select>
+        </div>
+
+        <!-- Plan / Tier Selection -->
+        <div>
+          <label class="block text-[11px] font-mono-cyber text-slate-300 mb-1.5">PLAN / TIER (প্ল্যান)</label>
+          <select id="selectPlan" class="w-full px-3 py-2.5 rounded-xl bg-black/70 border border-slate-700 text-white font-mono-cyber text-xs focus:outline-none focus:border-red-400 cursor-pointer">
+            <option value="VIP ACCESS" selected>VIP ACCESS (Standard Paid)</option>
+            <option value="ULTRA VIP">ULTRA VIP (High Precision)</option>
+            <option value="PRO MODS">PRO MODS (Full Server 1)</option>
+            <option value="LIFETIME VIP">LIFETIME VIP (Permanent Access)</option>
+          </select>
+        </div>
+
+        <!-- Note / Customer Details -->
+        <div>
+          <label class="block text-[11px] font-mono-cyber text-slate-300 mb-1.5">CUSTOMER NOTE (নোট বা টেলিগ্রাম ইউজার)</label>
+          <input type="text" id="inputNote" placeholder="e.g. Paid by Abir / @username" class="w-full px-3 py-2.5 rounded-xl bg-black/70 border border-slate-700 text-white font-mono-cyber text-xs focus:outline-none focus:border-red-400" />
+        </div>
+
+        <!-- Generate Button -->
+        <button onclick="createKeyInFirebase()" id="btnCreateKey" class="w-full py-3.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-cyber font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-red-900/40 border border-red-400/50 cursor-pointer transition-all flex items-center justify-center gap-2 mt-2">
+          <span>⚡</span>
+          <span>SAVE & CREATE IN FIREBASE</span>
+        </button>
+
+        <div class="text-[10px] font-mono-cyber text-slate-500 text-center">
+          Written directly to abirhackadmin Firebase RTDB
+        </div>
+      </div>
+
+      <!-- Key List & Real-time Management (Right column) -->
+      <div class="lg:col-span-2 glass-card p-5 rounded-3xl flex flex-col gap-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
+          <div class="flex items-center gap-2">
+            <span class="text-xl">🗝️</span>
+            <div>
+              <h2 class="font-cyber font-bold text-sm tracking-wider text-white uppercase">LIVE KEYS IN FIREBASE</h2>
+              <div class="text-[11px] font-mono-cyber text-slate-400">Manage, revoke, extend or test active keys</div>
+            </div>
+          </div>
+
+          <!-- Search & Filter Controls -->
+          <div class="flex items-center gap-2">
+            <input type="text" id="searchKey" oninput="renderKeyTable()" placeholder="Search key or note..." class="px-3 py-1.5 rounded-xl bg-black/70 border border-slate-700 text-white font-mono-cyber text-xs focus:outline-none focus:border-red-400 w-44" />
+            <select id="filterStatus" onchange="renderKeyTable()" class="px-2.5 py-1.5 rounded-xl bg-black/70 border border-slate-700 text-slate-300 font-mono-cyber text-xs focus:outline-none">
+              <option value="all">All Keys</option>
+              <option value="active">Active Only</option>
+              <option value="expired">Expired</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Table Container -->
+        <div class="overflow-x-auto max-h-[500px] overflow-y-auto rounded-2xl border border-white/5 bg-black/40">
+          <table class="w-full text-left text-xs font-mono-cyber">
+            <thead class="bg-[#0b0e17] text-slate-400 border-b border-white/10 uppercase tracking-wider sticky top-0 z-10 text-[10px]">
+              <tr>
+                <th class="p-3">Key Name</th>
+                <th class="p-3">Plan</th>
+                <th class="p-3">Status</th>
+                <th class="p-3">Validity</th>
+                <th class="p-3">Note</th>
+                <th class="p-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="keysTableBody" class="divide-y divide-white/5 text-slate-200">
+              <tr>
+                <td colspan="6" class="p-8 text-center text-slate-500">
+                  <div class="animate-spin inline-block w-6 h-6 border-2 border-red-500 border-t-transparent rounded-full mb-2"></div>
+                  <div>Loading keys from Firebase Database...</div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Bottom Export / Bulk Action Row -->
+        <div class="flex flex-wrap items-center justify-between gap-3 pt-2 text-[11px] font-mono-cyber text-slate-400">
+          <div class="flex items-center gap-2">
+            <button onclick="exportKeysJSON()" class="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 transition-colors cursor-pointer">
+              📥 Export JSON
+            </button>
+            <button onclick="testKeyInteractive()" class="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 transition-colors cursor-pointer">
+              🔍 Test Key Gateway
+            </button>
+          </div>
+          <div id="tableCounter" class="text-slate-500">
+            Showing 0 keys
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Firebase Configuration Modal -->
+  <div id="configModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="glass-card max-w-md w-full p-6 rounded-3xl border border-red-500/40 glow-red flex flex-col gap-4">
+      <div class="flex items-center justify-between border-b border-white/10 pb-3">
+        <h3 class="font-cyber font-bold text-sm tracking-wider text-white">FIREBASE RTDB CONFIG</h3>
+        <button onclick="toggleConfigModal(false)" class="text-slate-400 hover:text-white cursor-pointer font-bold text-lg">&times;</button>
+      </div>
+      <div>
+        <label class="block text-xs font-mono-cyber text-slate-300 mb-1">Firebase Realtime DB Base URL</label>
+        <input type="text" id="configDbUrl" class="w-full px-3 py-2 rounded-xl bg-black/80 border border-slate-700 text-white font-mono-cyber text-xs" />
+        <p class="text-[10px] text-slate-500 mt-1">Default: https://abirhackadmin-default-rtdb.firebaseio.com</p>
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="toggleConfigModal(false)" class="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-mono-cyber">Cancel</button>
+        <button onclick="saveConfig()" class="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-mono-cyber font-bold">Save & Test</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Configuration
+    let FIREBASE_BASE_URL = localStorage.getItem('arx_admin_rtdb_url') || 'https://abirhackadmin-default-rtdb.firebaseio.com';
+    let allKeys = [];
+
+    function showToast(msg, icon = '⚡') {
+      const toast = document.getElementById('toast');
+      const toastMsg = document.getElementById('toastMsg');
+      const toastIcon = document.getElementById('toastIcon');
+      toastMsg.innerText = msg;
+      toastIcon.innerText = icon;
+      toast.classList.remove('translate-x-96');
+      setTimeout(() => {
+        toast.classList.add('translate-x-96');
+      }, 3000);
+    }
+
+    function randomizeKey() {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      const chunk = (len) => Array.from({length: len}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+      const generated = `ARX-${chunk(4)}-${chunk(4)}-VIP`;
+      document.getElementById('inputKeyName').value = generated;
+      showToast('New random VIP key generated: ' + generated, '🎲');
+    }
+
+    function toggleConfigModal(open) {
+      const modal = document.getElementById('configModal');
+      if (open) {
+        document.getElementById('configDbUrl').value = FIREBASE_BASE_URL;
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      } else {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+      }
+    }
+
+    function saveConfig() {
+      const val = document.getElementById('configDbUrl').value.trim().replace(/\/$/, '');
+      if (val) {
+        FIREBASE_BASE_URL = val;
+        localStorage.setItem('arx_admin_rtdb_url', val);
+        showToast('Firebase DB URL updated!', '✅');
+        toggleConfigModal(false);
+        fetchKeysFromFirebase();
+      }
+    }
+
+    function formatTime(expireMs) {
+      if (!expireMs) return 'Active';
+      const diff = expireMs - Date.now();
+      if (diff <= 0) return 'Expired';
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      if (days > 0) return `${days}d ${hours}h left`;
+      return `${hours}h ${minutes}m left`;
+    }
+
+    async function fetchKeysFromFirebase() {
+      const tbody = document.getElementById('keysTableBody');
+      const startMs = Date.now();
+      try {
+        // Try direct RTDB endpoint, fallback to server proxy if CORS
+        let res;
+        try {
+          res = await fetch(`${FIREBASE_BASE_URL}/keys.json`, { cache: 'no-store' });
+        } catch {
+          res = await fetch('/api/admin/keys');
+        }
+
+        const data = await res.json();
+        const ping = Date.now() - startMs;
+        document.getElementById('statPing').innerText = `${ping}ms`;
+
+        let rawObj = {};
+        if (data && data.keys && Array.isArray(data.keys)) {
+          allKeys = data.keys;
+        } else if (data && typeof data === 'object') {
+          rawObj = data;
+          allKeys = Object.entries(rawObj).map(([keyName, val]) => {
+            let active = true;
+            let status = 'active';
+            let plan = 'PAID VIP';
+            let createdAt = Date.now();
+            let expiresAt = null;
+            let note = '';
+            let isLifetime = false;
+
+            if (val === true) {
+              plan = 'VIP ACCESS';
+              isLifetime = true;
+            } else if (typeof val === 'object' && val !== null) {
+              plan = val.plan || val.type || 'PAID VIP';
+              note = val.note || '';
+              if (val.active === false || String(val.status).toLowerCase() === 'inactive') {
+                active = false;
+                status = 'inactive';
+              }
+              if (val.lifetime || val.isLifetime) {
+                isLifetime = true;
+              }
+              createdAt = val.createdAt || (val.created_at ? new Date(val.created_at).getTime() : Date.now());
+              expiresAt = val.expiresAt || val.expires || val.expiry || null;
+              if (!expiresAt && val.duration_hours) {
+                expiresAt = createdAt + Number(val.duration_hours) * 3600 * 1000;
+              } else if (!expiresAt && val.durationDays) {
+                expiresAt = createdAt + Number(val.durationDays) * 86400 * 1000;
+              }
+              if (expiresAt && expiresAt < Date.now()) {
+                status = 'expired';
+                active = false;
+              }
+            }
+
+            return {
+              key: keyName,
+              active,
+              status,
+              plan,
+              createdAt,
+              expiresAt,
+              isLifetime,
+              note,
+              rawData: val
+            };
+          });
+        }
+
+        updateStats();
+        renderKeyTable();
+        showToast(`Synced ${allKeys.length} keys from Firebase`, '🔄');
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-red-400">Failed to connect to Firebase database: ${err.message}</td></tr>`;
+      }
+    }
+
+    function updateStats() {
+      const total = allKeys.length;
+      const active = allKeys.filter(k => k.status === 'active').length;
+      const expired = allKeys.filter(k => k.status === 'expired').length;
+      document.getElementById('statTotal').innerText = total;
+      document.getElementById('statActive').innerText = active;
+      document.getElementById('statExpired').innerText = expired;
+    }
+
+    function renderKeyTable() {
+      const query = (document.getElementById('searchKey').value || '').toLowerCase().trim();
+      const statusFilter = document.getElementById('filterStatus').value;
+      const tbody = document.getElementById('keysTableBody');
+
+      let filtered = allKeys.filter(k => {
+        if (statusFilter !== 'all' && k.status !== statusFilter) return false;
+        if (query) {
+          const matchKey = k.key.toLowerCase().includes(query);
+          const matchNote = (k.note || '').toLowerCase().includes(query);
+          const matchPlan = (k.plan || '').toLowerCase().includes(query);
+          return matchKey || matchNote || matchPlan;
+        }
+        return true;
+      });
+
+      document.getElementById('tableCounter').innerText = `Showing ${filtered.length} of ${allKeys.length} keys`;
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-slate-500 font-mono-cyber">No keys found matching criteria.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(k => {
+        let statusBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-500/40">ACTIVE</span>';
+        if (k.status === 'expired') {
+          statusBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950/80 text-amber-400 border border-amber-500/40">EXPIRED</span>';
+        } else if (k.status === 'inactive') {
+          statusBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-red-950/80 text-red-400 border border-red-500/40">INACTIVE</span>';
+        }
+
+        let validityText = k.isLifetime ? 'Lifetime VIP' : formatTime(k.expiresAt);
+
+        return `
+          <tr class="hover:bg-slate-900/40 transition-colors">
+            <td class="p-3 font-bold text-white flex items-center gap-1.5">
+              <span>${k.key}</span>
+              <button onclick="copyToClipboard('${k.key}')" class="p-1 text-slate-400 hover:text-white cursor-pointer" title="Copy Key">
+                📋
+              </button>
+            </td>
+            <td class="p-3 text-slate-300">
+              <span class="px-2 py-0.5 rounded text-[10px] bg-black/60 border border-slate-700">${k.plan}</span>
+            </td>
+            <td class="p-3">${statusBadge}</td>
+            <td class="p-3 text-slate-300">${validityText}</td>
+            <td class="p-3 text-slate-400 truncate max-w-[140px]">${k.note || '-'}</td>
+            <td class="p-3 text-right">
+              <div class="flex items-center justify-end gap-1.5">
+                <button onclick="toggleKeyStatus('${k.key}', ${!k.active})" class="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-[10px] text-slate-300 border border-slate-700 cursor-pointer">
+                  ${k.active ? 'Revoke' : 'Activate'}
+                </button>
+                <button onclick="deleteKey('${k.key}')" class="p-1 rounded bg-red-950/60 hover:bg-red-900/60 text-red-400 border border-red-500/30 text-xs cursor-pointer" title="Delete">
+                  🗑️
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    async function createKeyInFirebase() {
+      let key = document.getElementById('inputKeyName').value.trim().toUpperCase();
+      if (!key) {
+        randomizeKey();
+        key = document.getElementById('inputKeyName').value.trim().toUpperCase();
+      }
+
+      const durationVal = document.getElementById('selectDuration').value;
+      const plan = document.getElementById('selectPlan').value;
+      const note = document.getElementById('inputNote').value.trim();
+
+      const now = Date.now();
+      let expiresAt = null;
+      let durationHours = null;
+      let durationDays = null;
+      let isLifetime = false;
+
+      if (durationVal === 'lifetime') {
+        isLifetime = true;
+      } else if (durationVal.endsWith('_hours')) {
+        durationHours = parseInt(durationVal);
+        expiresAt = now + durationHours * 3600 * 1000;
+      } else if (durationVal.endsWith('_days')) {
+        durationDays = parseInt(durationVal);
+        expiresAt = now + durationDays * 86400 * 1000;
+      }
+
+      const payload = {
+        key,
+        active: true,
+        status: 'active',
+        plan,
+        createdAt: now,
+        expiresAt,
+        durationDays,
+        duration_hours: durationHours,
+        isLifetime,
+        note: note || `Created via Admin Panel on ${new Date().toLocaleDateString()}`,
+        createdBy: 'admin'
+      };
+
+      const btn = document.getElementById('btnCreateKey');
+      btn.disabled = true;
+      btn.innerText = 'SAVING TO FIREBASE...';
+
+      try {
+        // Direct Firebase PUT
+        let res = await fetch(`${FIREBASE_BASE_URL}/keys/${encodeURIComponent(key)}.json`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          // Fallback via API
+          res = await fetch('/api/admin/keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key, plan, durationHours, durationDays, isLifetime, note })
+          });
+        }
+
+        showToast(`Key '${key}' successfully created in Firebase!`, '🎉');
+        copyToClipboard(key);
+        document.getElementById('inputKeyName').value = '';
+        document.getElementById('inputNote').value = '';
+        fetchKeysFromFirebase();
+      } catch (err) {
+        showToast('Error saving key: ' + err.message, '❌');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>⚡</span><span>SAVE & CREATE IN FIREBASE</span>';
+      }
+    }
+
+    async function toggleKeyStatus(key, newActiveState) {
+      try {
+        const updates = {
+          active: newActiveState,
+          status: newActiveState ? 'active' : 'inactive'
+        };
+        await fetch(`${FIREBASE_BASE_URL}/keys/${encodeURIComponent(key)}.json`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updates)
+        });
+        showToast(`Key '${key}' status updated.`, '⚙️');
+        fetchKeysFromFirebase();
+      } catch (err) {
+        showToast('Error updating key: ' + err.message, '❌');
+      }
+    }
+
+    async function deleteKey(key) {
+      if (!confirm(`Are you sure you want to permanently delete VIP Key '${key}' from Firebase?`)) {
+        return;
+      }
+      try {
+        await fetch(`${FIREBASE_BASE_URL}/keys/${encodeURIComponent(key)}.json`, {
+          method: 'DELETE'
+        });
+        showToast(`Key '${key}' deleted from Firebase.`, '🗑️');
+        fetchKeysFromFirebase();
+      } catch (err) {
+        showToast('Error deleting key: ' + err.message, '❌');
+      }
+    }
+
+    function copyToClipboard(text) {
+      navigator.clipboard.writeText(text).then(() => {
+        showToast(`Key copied to clipboard: ${text}`, '📋');
+      }).catch(() => {
+        showToast(`Key: ${text}`, '📋');
+      });
+    }
+
+    function exportKeysJSON() {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(allKeys, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `arx_keys_backup_${Date.now()}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      showToast('Exported all keys to JSON file.', '📁');
+    }
+
+    async function testKeyInteractive() {
+      const keyToTest = prompt("Enter VIP Key to test against Firebase verification gateway:");
+      if (!keyToTest) return;
+      try {
+        const res = await fetch('/api/verify-key', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: keyToTest.trim() })
+        });
+        const result = await res.json();
+        if (result.valid) {
+          alert(`✅ KEY VALID!\nPlan: ${result.plan}\nExpiry: ${result.expiryText}`);
+        } else {
+          alert(`❌ KEY INVALID!\nMessage: ${result.message}`);
+        }
+      } catch (err) {
+        alert('Verification error: ' + err.message);
+      }
+    }
+
+    // Auto-init
+    window.addEventListener('DOMContentLoaded', () => {
+      randomizeKey();
+      fetchKeysFromFirebase();
+    });
+  </script>
+</body>
+</html>
